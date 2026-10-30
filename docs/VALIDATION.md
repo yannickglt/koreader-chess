@@ -19,23 +19,27 @@ Sur la liseuse, depuis le plugin Terminal de KOReader ou SSH (à activer seuleme
 
 ## 2. Copie
 
+Faite une première fois le 30 octobre 2026 au soir (volume `/Volumes/eReader`, montage `msdos`, KOReader v2026.07.1, 26 Go libres) ; à refaire pour chaque nouvelle version.
+
 1. Brancher la liseuse, vérifier le volume : `ls /Volumes/eReader/.adds/koreader/plugins`.
-2. `cp -R chess.koplugin /Volumes/eReader/.adds/koreader/plugins/` puis `diff -r chess.koplugin /Volumes/eReader/.adds/koreader/plugins/chess.koplugin`.
+2. `cp -R chess.koplugin /Volumes/eReader/.adds/koreader/plugins/` puis `diff -r chess.koplugin /Volumes/eReader/.adds/koreader/plugins/chess.koplugin` ; macOS ajoute des fichiers `._*` sur un volume FAT, à retirer avec `dot_clean -m /Volumes/eReader/.adds/koreader/plugins/chess.koplugin`.
 3. `diskutil eject /Volumes/eReader`, puis redémarrer KOReader.
 4. L'entrée se trouve dans **Outils → Plus d'outils → Échecs**.
 
 ## 3. Premier lancement
 
 - Ouvrir Échecs depuis le gestionnaire de fichiers, puis depuis un livre ouvert : dans les deux cas, fermer l'échiquier puis fermer le livre doit laisser KOReader intact (le plugin reçoit `dialog = ReaderUI` depuis un livre).
-- L'échiquier apparaît-il ? Les glyphes sont-ils rendus (FreeSerif) et lisibles ? Les cases sont-elles carrées, la boîte entière sans défilement, en portrait puis en paysage ?
+- L'échiquier apparaît-il, plein écran, sans marge de boîte de dialogue ? Les glyphes sont-ils rendus (FreeSerif) et lisibles ? Les cases sont-elles carrées, les repères A–H et 1–8 lisibles, l'en-tête sur deux lignes, en portrait puis en paysage (rotation pendant que l'échiquier est ouvert) ?
+- Compter les flashs : un seul à l'ouverture, un à la fermeture ; aucun pendant une sélection, un coup de l'enfant, un coup de l'ordinateur. Noter la durée visible des mises à jour partielles (cases, en-tête) sur l'écran Kaleido et les images fantômes éventuelles après une dizaine de coups.
 - Relever dans `/mnt/onboard/.adds/koreader/crash.log` les lignes `chess: moteur prêt en N ms` (lancement et chargement du réseau NNUE), `chess: coup de l'ordinateur … N ms`, `chess: conseil … N ms`.
 - Si le moteur ne démarre pas ou cesse de répondre : message à l'écran, titre « Moteur arrêté · touchez l'échiquier », erreur `Transport` ou `Stockfish` dans crash.log ; un toucher sur l'échiquier doit le relancer, quel que soit le trait.
 - `ls -l /proc/$(pidof stockfish)/fd` : seuls 0, 1 (la socket) et 2 doivent être ouverts, aucun descripteur d'écran, de tactile ni de fichier KOReader. Vérifier alors l'interpréteur ELF, la glibc, et que le dossier `bin` du plugin est bien ajouté à `LD_LIBRARY_PATH` par le plugin.
 
 ## 4. Jeu
 
-- Dix coups à chaque niveau ; noter le temps ressenti par coup, le flash à chaque coup (acceptable ou non), la lisibilité des marqueurs `•`, `○`, `×`, `★` et du surlignage du dernier coup. Stockfish tourne en `SCHED_BATCH` à priorité réduite (héritage de `runInSubProcess`) : comparer les temps du journal (`chess: coup de l'ordinateur … N ms`) au temps demandé (100 à 500 ms selon le niveau), en particulier pendant un rafraîchissement d'écran.
-- Essayer roque, prise en passant, promotion, annulation, indice, réclamation de nulle, nouvelle partie, changement de niveau en cours de partie.
+- Dix coups à chaque niveau ; noter le temps ressenti par coup, la lisibilité des marqueurs dessinés (cadre, point, anneau, étoile) et du surlignage du dernier coup, et si la pause de 0,8 s entre la pièce encadrée par l'ordinateur et son déplacement convient à l'enfant (`COMPUTER_PAUSE` dans `main.lua`).
+- Jouer une partie avec les noirs : l'ordinateur ouvre, l'échiquier est retourné (repères 1 en haut, H à gauche), les touchers tombent sur la bonne case. Stockfish tourne en `SCHED_BATCH` à priorité réduite (héritage de `runInSubProcess`) : comparer les temps du journal (`chess: coup de l'ordinateur … N ms`) au temps demandé (100 à 500 ms selon le niveau), en particulier pendant un rafraîchissement d'écran.
+- Essayer roque, prise en passant, promotion, annulation, indice, réclamation de nulle, nouvelle partie (mode puis couleur), changement de niveau et masquage des repères dans Réglages en cours de partie.
 - Mémoire pendant une partie : `grep VmRSS /proc/$(pidof stockfish)/status`.
 
 ## 5. Veille et fermeture

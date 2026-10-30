@@ -77,8 +77,9 @@ function Engine:line(line)
         self.legal[#self.legal + 1] = line:match("^(%S+):")
     elseif line:match("^Nodes searched: %d+") then
         if self.fen then
-            local continue = self.on_position(self.fen, self.legal, self.checkers)
-            if continue ~= false and self.fen:match("^%S+ b ") and #self.legal > 0 then
+            -- Le plugin décide s'il faut chercher (trait de l'ordinateur, pas de nulle à trancher).
+            local think = self.on_position(self.fen, self.legal, self.checkers)
+            if think == true and #self.legal > 0 then
                 self:think()
             end
         end

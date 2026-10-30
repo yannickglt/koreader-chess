@@ -1,21 +1,18 @@
-local Blitbuffer = require("ffi/blitbuffer")
 local Board = require("board")
+local BoardWidget = require("boardwidget")
 local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
-local Device = require("device")
 local Engine = require("engine")
 local Game = require("game")
 local InfoMessage = require("ui/widget/infomessage")
 local LuaSettings = require("luasettings")
-local Size = require("ui/size")
 local Transport = require("transport")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ffiUtil = require("ffi/util")
 local logger = require("logger")
 local time = require("ui/time")
-local Screen = Device.screen
 
 -- `random` : probabilité qu'un coup de l'ordinateur soit tiré au hasard parmi les coups légaux.
 -- `skill` : Skill Level Stockfish (0 = le plus faible). `movetime` en millisecondes.
@@ -26,9 +23,9 @@ local levels = {
     {id = "intermediaire", name = "Intermédiaire", skill = 8, movetime = 350},
     {id = "difficile", name = "Difficile", skill = 15, movetime = 500},
 }
-local HINT_MOVETIME = 300
 local POLL_INTERVAL = 0.05
 local ENGINE_TIMEOUT = 20 -- secondes sans réponse du moteur avant de l'arrêter
+local COMPUTER_PAUSE = 0.8 -- secondes entre la pièce encadrée par l'ordinateur et son déplacement
 
 local function level_for(id)
     for _, level in ipairs(levels) do
@@ -43,7 +40,7 @@ function Chess:init()
     math.randomseed(os.time())
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/chess.lua")
     local saved = self.settings:readSetting("game") or {}
-    self.game = Game.new(saved.moves, level_for(saved.level).id, {keys = saved.keys, mode = saved.mode})
+    self.game = Game.new(saved.moves, level_for(saved.level).id, {keys = saved.keys, mode = saved.mode, color = saved.color})
     if #self.game.moves > 0 and saved.claimed_draw then self.game.claimed_draw = true end
     self.ui.menu:registerToMainMenu(self)
 end
@@ -72,11 +69,26 @@ function Chess:twoPlayers()
     return self.game.mode == "deux_joueurs"
 end
 
+-- Contre l'ordinateur, l'enfant choisit sa couleur à la création de la partie ; l'échiquier est
+-- retourné quand il joue les noirs.
+function Chess:computerTurn()
+    return not self:twoPlayers() and self.game.turn ~= self.game.color
+end
+
+function Chess:flipped()
+    return not self:twoPlayers() and self.game.color == "b"
+end
+
+function Chess:showCoords()
+    return self.settings:nilOrTrue("coords")
+end
+
 function Chess:save()
     self.settings:saveSetting("game", {
         moves = self.game.moves,
         level = self.game.level,
         mode = self.game.mode,
+        color = self.game.color,
         keys = self.game.keys,
         claimed_draw = self.game.claimed_draw,
     })
@@ -98,6 +110,8 @@ end
 
 function Chess:stopEngine()
     UIManager:unschedule(Chess.poll)
+    UIManager:unschedule(Chess.applyPendingMove)
+    self.pending_move = nil
     if self.transport then self.transport:close(); self.transport = nil end
     self.engine = nil
     self.hinting = false
@@ -128,14 +142,25 @@ function Chess:startEngine()
     return true
 end
 
+-- La pièce choisie par l'ordinateur est d'abord encadrée, puis déplacée après une courte pause :
+-- l'enfant voit ce qui est joué au lieu de découvrir une pièce déjà déplacée.
 function Chess:engineMoved(move)
     local engine = self.engine
     if not engine then return end
     logger.info(string.format("chess: coup de l'ordinateur %s (%s, %d ms)", move, engine.last_choice or "?",
         time.to_ms(engine.search_time or 0)))
+    self.pending_move = move
+    self:render()
+    UIManager:scheduleIn(COMPUTER_PAUSE, Chess.applyPendingMove, self)
+end
+
+function Chess:applyPendingMove()
+    local move = self.pending_move
+    self.pending_move = nil
+    if not move or not self.opened or not self.engine then return end
     self.game:append(move)
     self:save()
-    engine:play(self.game.moves)
+    self.engine:play(self.game.moves)
 end
 
 function Chess:acceptPosition(fen, legal, in_check)
@@ -155,7 +180,7 @@ function Chess:acceptPosition(fen, legal, in_check)
         if not self.game:consistent() then
             -- Stockfish ignore en silence un coup illégal : la liste sauvegardée ne décrit plus la position.
             logger.warn("chess: sauvegarde incohérente, nouvelle partie")
-            self.game = Game.new(nil, self.game.level, {mode = self.game.mode})
+            self.game = Game.new(nil, self.game.level, {mode = self.game.mode, color = self.game.color})
             self.selected, self.destinations, self.hint, self.pending_draw_decision = nil, nil, nil, false
             self:save()
             UIManager:show(InfoMessage:new{text = "La partie sauvegardée est illisible : nouvelle partie."})
@@ -164,7 +189,7 @@ function Chess:acceptPosition(fen, legal, in_check)
         end
     end
     local result = self.game:result()
-    local computer_turn = self.game.turn == "b" and not self:twoPlayers()
+    local computer_turn = self:computerTurn()
     self.pending_draw_decision = not result and computer_turn and self.game:can_claim_draw()
     local waiting = not result and computer_turn and not self.pending_draw_decision
     if waiting then self:setWaiting(true) else self.waiting, self.wait_started = false, nil end
@@ -207,12 +232,18 @@ function Chess:openBoard()
     if self.opened then return end
     self.opened = true
     self.waiting = true
-    self:render()
+    self.board_widget = BoardWidget:new{
+        view = self:view(),
+        on_square = function(square) self:tapSquare(square) end,
+        on_button = function(id) self:onButton(id) end,
+        on_close = function() self:confirmClose() end,
+    }
+    UIManager:show(self.board_widget)
     self:startEngine()
 end
 
 function Chess:closeDialogs()
-    for _, name in ipairs({"board_dialog", "promotion_dialog", "level_dialog", "mode_dialog"}) do
+    for _, name in ipairs({"board_widget", "promotion_dialog", "settings_dialog", "mode_dialog", "color_dialog"}) do
         if self[name] then UIManager:close(self[name]); self[name] = nil end
     end
 end
@@ -221,7 +252,6 @@ function Chess:closeBoard()
     self.opened = false
     self:stopEngine()
     self:closeDialogs()
-    self.render_signature = nil
     self:save()
 end
 
@@ -231,6 +261,7 @@ local result_text = {
     nulle_reclamee = "Partie nulle",
 }
 
+-- Première ligne de l'en-tête : à qui de jouer, ou ce que fait l'ordinateur.
 function Chess:statusText()
     local result = self.game:result()
     local two = self:twoPlayers()
@@ -238,7 +269,7 @@ function Chess:statusText()
         if two then
             return self.game.turn == "b" and "Échec et mat · les blancs gagnent" or "Échec et mat · les noirs gagnent"
         end
-        return self.game.turn == "b" and "Échec et mat · tu as gagné !" or "Échec et mat · l'ordinateur a gagné"
+        return self.game.turn ~= self.game.color and "Échec et mat · tu as gagné !" or "Échec et mat · l'ordinateur a gagné"
     elseif result then
         return result_text[result]
     elseif self.pending_draw_decision then
@@ -246,7 +277,7 @@ function Chess:statusText()
     elseif self.hinting then
         return "Je cherche un conseil…"
     elseif self.waiting then
-        return (not two and self.game.fen and self.game.turn == "b") and "L'ordinateur réfléchit…" or "Un instant…"
+        return (self.game.fen and self:computerTurn()) and "L'ordinateur réfléchit…" or "Un instant…"
     elseif not self.engine then
         return "Moteur arrêté · touchez l'échiquier"
     end
@@ -257,48 +288,40 @@ function Chess:statusText()
         text = "À vous de jouer"
     end
     if self.game.in_check then text = "Échec ! " .. text end
-    local from, to = self.game:last_move()
-    if from and two then
-        text = text .. " · dernier coup : " .. from .. " → " .. to
-    elseif from and self.game.turn == "w" then
-        text = text .. " · noirs : " .. from .. " → " .. to
-    end
     return text
 end
 
--- Cases carrées : la largeur de la boîte est déduite de la taille de case, elle-même bornée
--- par la largeur et par la hauteur de l'écran (titre et deux rangées de boutons réservés).
-function Chess:geometry()
-    local sep = Size.line.medium
-    local chrome = 2 * (Size.border.window + Size.padding.button)
-    local limit = math.min(math.floor(Screen:getWidth() * 0.96), Screen:getHeight() - Screen:scaleBySize(140))
-    local square = math.floor((limit - chrome - 7 * sep) / 8)
-    local scale = Screen:scaleBySize(100) / 100
-    return {
-        square = square,
-        width = 8 * square + 7 * sep + chrome,
-        button_height = square - 2 * Size.padding.buttontable,
-        font_size = math.floor(square * 0.57 / scale),
-    }
+local piece_names = {q = "dame", r = "tour", b = "fou", n = "cavalier"}
+
+-- « E2 → E4 », « E7 → E8 (dame) » : cases en majuscules, comme les repères de l'échiquier.
+local function describe(move)
+    local text = move:sub(1, 2):upper() .. " → " .. move:sub(3, 4):upper()
+    local promotion = move:sub(5, 5)
+    if promotion ~= "" then text = text .. " (" .. piece_names[promotion] .. ")" end
+    return text
 end
 
-function Chess:label(square)
-    local piece = Board.piece(self.game.board[square])
-    if self.selected == square then return "•" .. piece end
-    if self.hint and self.selected == self.hint:sub(1, 2) and self.hint:sub(3, 4) == square then return "★" .. piece end
-    if self.destinations and self.destinations[square] then
-        -- Prise en passant : la case d'arrivée est vide mais le pion change de colonne.
-        local mover = self.selected and self.game.board[self.selected]
-        local capture = self.game.board[square] ~= nil
-            or (mover ~= nil and mover:lower() == "p" and square:sub(1, 1) ~= self.selected:sub(1, 1))
-        return (capture and "×" or "○") .. piece
+-- Seconde ligne : mode, niveau, dernier coup joué.
+function Chess:detailText()
+    local parts = {mode_names[self.game.mode] or "Échecs"}
+    if not self:twoPlayers() then parts[#parts + 1] = self:level().name end
+    local move = self.game.moves[#self.game.moves]
+    if move then
+        parts[#parts + 1] = (#self.game.moves % 2 == 1 and "Blancs : " or "Noirs : ") .. describe(move)
     end
-    return piece
+    return table.concat(parts, " · ")
+end
+
+-- Prise, y compris en passant : la case d'arrivée est vide mais le pion change de colonne.
+function Chess:capture(square)
+    if self.game.board[square] ~= nil then return true end
+    local mover = self.selected and self.game.board[self.selected]
+    return mover ~= nil and mover:lower() == "p" and square:sub(1, 1) ~= self.selected:sub(1, 1)
 end
 
 function Chess:humanTurn()
     return self.game.fen ~= nil and not self.waiting and not self.pending_draw_decision
-        and (self.game.turn == "w" or self:twoPlayers()) and not self.game:result()
+        and (self.game.turn == self.game.color or self:twoPlayers()) and not self.game:result()
 end
 
 -- Contre l'ordinateur, annuler retire la paire de demi-coups ; à deux joueurs, le dernier seulement.
@@ -309,75 +332,67 @@ end
 function Chess:canUndo()
     if self.game.fen == nil or self.waiting or self.pending_draw_decision then return false end
     if self:twoPlayers() then return #self.game.moves >= 1 end
-    return self:learning() and self.game.turn == "w" and #self.game.moves >= 2
+    return self:learning() and self.game.turn == self.game.color and #self.game.moves >= 2
+end
+
+-- État affiché par BoardWidget : en-tête, cases (pièce, marqueur, dernier coup), boutons.
+function Chess:view()
+    local game = self.game
+    local human_turn = self:humanTurn()
+    local can_undo = self:canUndo()
+    local can_claim = human_turn and game:can_claim_draw()
+    local last_from, last_to = game:last_move()
+    local hint_to = self.hint and self.selected == self.hint:sub(1, 2) and self.hint:sub(3, 4) or nil
+    local pending_from = self.pending_move and self.pending_move:sub(1, 2)
+    local squares = {}
+    for row = 1, 8 do
+        for column = 1, 8 do
+            local square = Board.square(row, column)
+            local cell = {piece = game.board[square]}
+            if self.selected == square or pending_from == square then
+                cell.mark = "selected"
+            elseif self.destinations and self.destinations[square] then
+                cell.mark = self:capture(square) and "ring" or "dot"
+            end
+            if hint_to == square then cell.star = true end
+            if square == last_from or square == last_to then cell.last = true end
+            squares[square] = cell
+        end
+    end
+    local rows = {{{id = "new", text = "Nouvelle partie"}, {id = "settings", text = "Réglages"}, {id = "close", text = "Fermer"}}, {}}
+    local row = rows[2]
+    if self:learning() or self:twoPlayers() then
+        row[#row + 1] = {id = "undo", text = "Annuler le coup", enabled = can_undo}
+    end
+    if self:learning() then
+        row[#row + 1] = {id = "hint", text = "Indice", enabled = human_turn}
+    end
+    if self.pending_draw_decision then
+        row[#row + 1] = {id = "continue", text = "Continuer"}
+        row[#row + 1] = {id = "claim", text = "Réclamer la nulle"}
+    else
+        row[#row + 1] = {id = "claim", text = "Réclamer la nulle", enabled = can_claim}
+    end
+    return {
+        status = self:statusText(), detail = self:detailText(),
+        flipped = self:flipped(), coords = self:showCoords(),
+        squares = squares, buttons = rows,
+    }
 end
 
 function Chess:render()
-    if not self.opened then return end
-    local status = self:statusText()
-    local human_turn = self:humanTurn()
-    local can_undo = self:canUndo()
-    local can_claim = human_turn and self.game:can_claim_draw()
-    local last_from, last_to = self.game:last_move()
-    -- La boîte n'est reconstruite (rafraîchissement complet sur E Ink) que si ce qui s'affiche change.
-    local labels = {}
-    for row = 1, 8 do
-        for column = 1, 8 do labels[#labels + 1] = self:label(Board.square(row, column)) end
-    end
-    local signature = table.concat({table.concat(labels), last_from or "", last_to or "", status,
-        tostring(self.game.level), tostring(self.game.mode), tostring(human_turn), tostring(can_undo),
-        tostring(can_claim), tostring(self.pending_draw_decision)}, "|")
-    if self.board_dialog and self.render_signature == signature then return end
-    local geometry = self:geometry()
-    local buttons = {}
-    for row = 1, 8 do
-        buttons[row] = {}
-        for column = 1, 8 do
-            local square = Board.square(row, column)
-            local background
-            if square == last_from or square == last_to then
-                background = Blitbuffer.COLOR_GRAY_9
-            else
-                background = (row + column) % 2 == 0 and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_LIGHT_GRAY
-            end
-            buttons[row][column] = {
-                id = square,
-                text = labels[(row - 1) * 8 + column],
-                background = background,
-                font_size = geometry.font_size,
-                width = geometry.square,
-                height = geometry.button_height,
-                callback = function() self:tapSquare(square) end,
-            }
-        end
-    end
-    buttons[9] = {{text = "Nouvelle partie", callback = function() self:confirmNewGame() end}}
-    if not self:twoPlayers() then
-        buttons[9][2] = {text = self:level().name, callback = function() self:chooseLevel() end}
-    end
-    buttons[9][#buttons[9] + 1] = {text = "Fermer", callback = function() self:confirmClose() end}
-    local row = {}
-    if self:learning() or self:twoPlayers() then
-        row[1] = {text = "Annuler le coup", enabled = can_undo, callback = function() self:confirmUndo() end}
-    end
-    if self:learning() then
-        row[#row + 1] = {text = "Indice", enabled = human_turn, callback = function() self:requestHint() end}
-    end
-    if self.pending_draw_decision then
-        row[#row + 1] = {text = "Continuer", callback = function() self:continueAfterClaim() end}
-        row[#row + 1] = {text = "Réclamer la nulle", callback = function() self:confirmClaimDraw() end}
-    else
-        row[#row + 1] = {text = "Réclamer la nulle", enabled = can_claim, callback = function() self:confirmClaimDraw() end}
-    end
-    buttons[10] = row
-    local new_dialog = ButtonDialog:new{
-        title = (mode_names[self.game.mode] or "Échecs") .. " · " .. status,
-        buttons = buttons, dismissable = false, width = geometry.width,
-    }
-    if self.board_dialog then UIManager:close(self.board_dialog) end
-    self.board_dialog = new_dialog
-    self.render_signature = signature
-    UIManager:show(new_dialog)
+    if not self.opened or not self.board_widget then return end
+    self.board_widget:setView(self:view())
+end
+
+local actions = {
+    new = "confirmNewGame", settings = "openSettings", close = "confirmClose",
+    undo = "confirmUndo", hint = "requestHint", continue = "continueAfterClaim", claim = "confirmClaimDraw",
+}
+
+function Chess:onButton(id)
+    local action = actions[id]
+    if action then self[action](self) end
 end
 
 -- Confirmations ------------------------------------------------------------------
@@ -409,21 +424,9 @@ end
 -- Interactions ----------------------------------------------------------------
 
 function Chess:setSelection(square)
-    local touched = {}
-    if self.selected then touched[self.selected] = true end
-    for destination in pairs(self.destinations or {}) do touched[destination] = true end
     self.selected = square
     self.destinations = square and self.game:destinations(square) or nil
-    if square then touched[square] = true end
-    for destination in pairs(self.destinations or {}) do touched[destination] = true end
-    if not self.board_dialog then return end
-    for current in pairs(touched) do
-        local button = self.board_dialog.buttontable:getButtonById(current)
-        if button then
-            button:setText(self:label(current), button.width)
-            button:refresh()
-        end
-    end
+    self:render()
 end
 
 function Chess:tapSquare(square)
@@ -440,7 +443,7 @@ function Chess:tapSquare(square)
     if from == square then self:setSelection(nil); return end
     local move = self.game:move_for(from, square)
     if move then
-        self:setSelection(nil)
+        self.selected, self.destinations = nil, nil
         self:makeMove(move)
         return
     end
@@ -487,8 +490,7 @@ end
 function Chess:requestHint()
     if not self:learning() or not self:humanTurn() or self.hinting then return end
     if not self.engine then self:startEngine(); return end
-    self:setSelection(nil)
-    self.hint = nil
+    self.selected, self.destinations, self.hint = nil, nil, nil
     self.hinting = true
     self:setWaiting(true)
     self:render()
@@ -529,9 +531,10 @@ function Chess:continueAfterClaim()
     self.engine:think()
 end
 
-function Chess:newGame(mode)
+function Chess:newGame(mode, color)
     self:closeModeDialog()
-    self.game = Game.new(nil, self.game.level, {mode = mode})
+    self:closeColorDialog()
+    self.game = Game.new(nil, self.game.level, {mode = mode, color = color})
     self.selected, self.destinations, self.hint = nil, nil, nil
     self.pending_draw_decision = false
     self:save()
@@ -539,16 +542,16 @@ function Chess:newGame(mode)
     self:render()
 end
 
--- Une nouvelle partie commence par le choix du mode ; la confirmation ne s'affiche que si des
--- coups ont été joués.
+-- Une nouvelle partie commence par le choix du mode, puis de la couleur contre l'ordinateur ;
+-- la confirmation ne s'affiche que si des coups ont été joués.
 function Chess:chooseMode()
     if self.mode_dialog then return end
     self.mode_dialog = ButtonDialog:new{
         title = "Nouvelle partie",
         buttons = {
-            {{text = "Apprentissage · indices et retour en arrière", callback = function() self:newGame("apprentissage") end}},
-            {{text = "Partie · sans aide", callback = function() self:newGame("partie") end}},
-            {{text = "Deux joueurs · à tour de rôle sur l'écran", callback = function() self:newGame("deux_joueurs") end}},
+            {{text = "Apprentissage · indices et retour en arrière", callback = function() self:chooseColor("apprentissage") end}},
+            {{text = "Partie · sans aide", callback = function() self:chooseColor("partie") end}},
+            {{text = "Deux joueurs · à tour de rôle sur l'écran", callback = function() self:newGame("deux_joueurs", "w") end}},
             {{text = "Retour", callback = function() self:closeModeDialog() end}},
         },
         tap_close_callback = function() self.mode_dialog = nil end,
@@ -560,6 +563,25 @@ function Chess:closeModeDialog()
     if self.mode_dialog then UIManager:close(self.mode_dialog); self.mode_dialog = nil end
 end
 
+function Chess:chooseColor(mode)
+    self:closeModeDialog()
+    if self.color_dialog then return end
+    self.color_dialog = ButtonDialog:new{
+        title = "Vos pièces",
+        buttons = {
+            {{text = "Blancs · je commence", callback = function() self:newGame(mode, "w") end}},
+            {{text = "Noirs · l'ordinateur commence", callback = function() self:newGame(mode, "b") end}},
+            {{text = "Retour", callback = function() self:closeColorDialog(); self:chooseMode() end}},
+        },
+        tap_close_callback = function() self.color_dialog = nil end,
+    }
+    UIManager:show(self.color_dialog)
+end
+
+function Chess:closeColorDialog()
+    if self.color_dialog then UIManager:close(self.color_dialog); self.color_dialog = nil end
+end
+
 function Chess:confirmNewGame()
     if #self.game.moves == 0 then self:chooseMode(); return end
     local text = self.game:result() and "Commencer une nouvelle partie ?"
@@ -567,29 +589,43 @@ function Chess:confirmNewGame()
     self:confirm(text, function() self:chooseMode() end)
 end
 
-function Chess:chooseLevel()
-    if self.level_dialog then return end
+-- Réglages : niveau de l'ordinateur (sauf à deux joueurs) et repères de l'échiquier.
+function Chess:openSettings()
+    if self.settings_dialog then return end
     local buttons = {}
-    for _, level in ipairs(levels) do
-        local text = level.name .. (level.blurb and (" · " .. level.blurb) or "")
-        if level.id == self.game.level then text = "✓ " .. text end
-        local id = level.id
-        buttons[#buttons + 1] = {{text = text, callback = function() self:setLevel(id) end}}
+    if not self:twoPlayers() then
+        for _, level in ipairs(levels) do
+            local text = level.name .. (level.blurb and (" · " .. level.blurb) or "")
+            if level.id == self.game.level then text = "✓ " .. text end
+            local id = level.id
+            buttons[#buttons + 1] = {{text = text, callback = function() self:setLevel(id) end}}
+        end
     end
-    buttons[#buttons + 1] = {{text = "Retour", callback = function() self:closeLevelDialog() end}}
-    self.level_dialog = ButtonDialog:new{
-        title = "Niveau de l'ordinateur", buttons = buttons,
-        tap_close_callback = function() self.level_dialog = nil end,
+    buttons[#buttons + 1] = {{
+        text = self:showCoords() and "Masquer les repères (A–H, 1–8)" or "Afficher les repères (A–H, 1–8)",
+        callback = function() self:toggleCoords() end,
+    }}
+    buttons[#buttons + 1] = {{text = "Retour", callback = function() self:closeSettings() end}}
+    self.settings_dialog = ButtonDialog:new{
+        title = self:twoPlayers() and "Réglages" or "Réglages · niveau de l'ordinateur", buttons = buttons,
+        tap_close_callback = function() self.settings_dialog = nil end,
     }
-    UIManager:show(self.level_dialog)
+    UIManager:show(self.settings_dialog)
 end
 
-function Chess:closeLevelDialog()
-    if self.level_dialog then UIManager:close(self.level_dialog); self.level_dialog = nil end
+function Chess:closeSettings()
+    if self.settings_dialog then UIManager:close(self.settings_dialog); self.settings_dialog = nil end
+end
+
+function Chess:toggleCoords()
+    self:closeSettings()
+    self.settings:saveSetting("coords", not self:showCoords())
+    self.settings:flush()
+    self:render()
 end
 
 function Chess:setLevel(id)
-    self:closeLevelDialog()
+    self:closeSettings()
     if id == self.game.level then return end
     self.game.level = id
     self:save()

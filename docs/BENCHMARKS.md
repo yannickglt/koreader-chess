@@ -38,3 +38,16 @@ Corrections : champ `board_dialog` (ReaderUI transmet `dialog = ReaderUI` aux pl
 | Linux ARMv7 émulé, LuaJIT, `ffi/posix_h.lua`, `ffi/util.lua` et `libs/libkoreader-lfs.so` du paquet kobov5 2026.07.1 | `scripts/test-arm-emulated.sh` | 8/8, transport en mode `koreader` (runInSubProcess), bench 43 516 nœuds en 346 ms |
 
 Le mode `koreader` du transport n'a été exercé qu'en émulation ; sur la Tolino, vérifier en plus que les hooks de fork du frontend (threads, descripteurs) se comportent comme prévu.
+
+## 30 octobre 2026, nuit : premier essai sur la Tolino et widget plein écran
+
+Installation sur la Tolino Vision Color (KOReader v2026.07.1, identifiée `Kobo_monza`, 1264 × 1680 à 300 ppp, montage `msdos`) : 10 fichiers identiques au dépôt, SHA-256 des binaires vérifiés. **Observations sur la liseuse (qualitatives, pas de chiffres relevés)** : le plugin s'ouvre, le moteur répond et les pièces sont lisibles ; la boîte de dialogue laisse une marge autour du jeu ; trop de flashs ; les marqueurs en préfixe décalent la pièce et exigent un rafraîchissement ; le coup de l'ordinateur apparaît déjà joué ; il manque les repères et le choix de la couleur. Ces retours ont motivé le widget plein écran (`docs/DESIGN.md`). Les temps `chess: …` du journal n'ont pas encore été relevés.
+
+Après le remplacement de la `ButtonDialog` par `boardwidget.lua` (rafraîchissements partiels, marqueurs dessinés, pause de l'ordinateur, couleur, repères) :
+
+| Environnement | Commande | Résultat |
+|---|---|---|
+| Mac ARM64, LuaJIT 2.1 local, Stockfish 16 macOS | `scripts/test.sh` | 8/8, transport `fork` |
+| Linux ARMv7 émulé (Docker), LuaJIT, `ffi/posix_h.lua`, `ffi/util.lua` du paquet kobov5 2026.07.1, Stockfish ARM du dépôt | `scripts/test-arm-emulated.sh` | 8/8, transport `koreader`, bench 43 516 nœuds en 314 ms (138 585 nœuds/s) |
+
+Le test d'interface vérifie, sur la géométrie simulée de la Tolino (cases de 147 px, échiquier de 1176 px, bande de 42 px), qu'une sélection ne rafraîchit que la boîte englobante des cases touchées, qu'un coup ne provoque aucun rendu avant la confirmation du moteur, et que l'ouverture est le seul rafraîchissement complet. Le nombre réel de flashs, la lisibilité des marqueurs dessinés et la durée des mises à jour partielles sur Kaleido restent **à mesurer sur la Tolino**.

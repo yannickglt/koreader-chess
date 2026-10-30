@@ -10,6 +10,7 @@ local states, reply, hint = 0, nil, nil
 local engine = Engine.new(transport, function(fen, legal, check)
     assert(game:update(fen, legal, check))
     states = states + 1
+    return game.turn == "b"
 end, function(move) reply = move end, function(move) hint = move end)
 engine:start({skill = 0, movetime = 150})
 

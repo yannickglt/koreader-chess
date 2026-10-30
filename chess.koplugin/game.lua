@@ -34,8 +34,8 @@ end
 
 -- `moves` : liste de coups UCI déjà joués ; `options.keys[i]` : clé de répétition de la
 -- position après i-1 coups ; `options.mode` : "apprentissage" (annulation et indice), "partie"
--- (sans aide) ou "deux_joueurs" (les deux couleurs sur l'écran). Une sauvegarde corrompue repart
--- d'une partie vide.
+-- (sans aide) ou "deux_joueurs" (les deux couleurs sur l'écran) ; `options.color` : couleur de
+-- l'enfant contre l'ordinateur ("w" ou "b"). Une sauvegarde corrompue repart d'une partie vide.
 local MODES = {apprentissage = true, partie = true, deux_joueurs = true}
 
 function Game.new(moves, level, options)
@@ -43,6 +43,7 @@ function Game.new(moves, level, options)
     local game = setmetatable({
         moves = {}, level = level, keys = {}, legal = {}, board = {}, turn = "w",
         mode = MODES[options.mode] and options.mode or "apprentissage",
+        color = options.color == "b" and "b" or "w",
     }, Game)
     if type(moves) == "table" then
         for _, move in ipairs(moves) do

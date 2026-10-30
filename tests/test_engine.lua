@@ -4,7 +4,11 @@ local Engine = require("engine")
 local sent = {}
 local states = {}
 local fake_transport = { send = function(_, s) sent[#sent + 1] = s end }
-local engine = Engine.new(fake_transport, function(fen, moves, check) states[#states + 1] = {fen, moves, check} end)
+-- Le moteur ne cherche que si le rappel le demande (ici : quand les noirs ont le trait).
+local engine = Engine.new(fake_transport, function(fen, moves, check)
+    states[#states + 1] = {fen, moves, check}
+    return fen:match("^%S+ b ") ~= nil
+end)
 engine:start({skill = 3, movetime = 250})
 assert(sent[1] == "uci\n")
 engine:line("uciok")

@@ -49,3 +49,25 @@ Le sondage du moteur (50 ms) ne tourne que quand une réponse est attendue ; au-
 ### Maquette
 
 Maquette Claude Design des écrans de jeu, de choix du niveau et de fin de partie, plus le composant échiquier : https://claude.ai/artifact/RKhQNPGaBK5HzpK1a4LCLm (lien privé). Elle reprend la boîte KOReader en niveaux de gris à la résolution de l'écran ; elle ne remplace pas l'essai sur E Ink.
+
+## Retours de la Tolino, 30 octobre 2026, nuit
+
+Première version essayée sur la liseuse : le plugin s'ouvre et joue, mais la `ButtonDialog` laisse une marge autour de l'échiquier, chaque demi-coup provoque un flash (fermeture de la boîte en `flashui`, clignotement des boutons au toucher), les marqueurs en préfixe de texte décalent la pièce, le coup de l'ordinateur apparaît déjà joué, et il manque les repères, le choix de la couleur et des cases en majuscules dans l'en-tête. La section « Interface » ci-dessus décrit donc l'ancienne approche ; voici la nouvelle.
+
+### Widget plein écran
+
+`boardwidget.lua` est un `InputContainer` qui couvre tout l'écran (`covers_fullscreen`) et dessine lui-même, dans le tampon d'écran : un en-tête de deux lignes (`tfont` 24 pt pour « À vous de jouer », `cfont` 17 pt pour « Apprentissage · Facile · Noirs : B8 → C6 »), l'échiquier aux cases carrées entouré d'une bande de 20 pt pour les repères, et deux rangées de boutons tracés par le widget (cadre arrondi, texte grisé quand inactif), sans le clignotement du `Button` KOReader. Les pièces sont des `TextWidget` en FreeSerif, mis en cache par glyphe. Les touchers sont résolus par géométrie : case ou bouton. La disposition est recalculée si la taille d'écran change (rotation).
+
+Le plugin ne manipule plus de boutons : `Chess:view()` produit un état (lignes d'en-tête, 64 cases avec pièce, marqueur, dernier coup, étoile, orientation, repères, boutons) et `BoardWidget:setView` compare cet état au précédent. Il ne demande que des rafraîchissements partiels en mode « ui » (sans flash) : l'en-tête, la boîte englobante des cases modifiées, la zone des boutons ; tout l'écran si l'orientation ou les repères changent ; rien si rien ne change. Seuls l'ouverture (« full ») et la fermeture (« flashui », contre les images fantômes) flashent. Sur l'écran Kaleido, KOReader n'applique les formes d'onde couleur qu'aux mises à jour tramées ; nos « ui » restent des mises à jour partielles en niveaux de gris.
+
+### Marqueurs
+
+Dessinés par-dessus la case, la pièce ne bouge pas : cadre épais noir (côté/16) pour la pièce choisie, point plein (rayon côté/8) pour une case libre, anneau (rayon côté/2) autour d'une pièce prenable, y compris en passant, petite étoile dans l'angle supérieur droit de la case conseillée (la pièce conseillée est encadrée). Les deux cases du dernier coup gardent le fond `COLOR_GRAY_9`.
+
+### Coup de l'ordinateur en deux temps
+
+`engineMoved` encadre d'abord la pièce que l'ordinateur va jouer (rafraîchissement d'une case) et programme `applyPendingMove` 0,8 s plus tard ; le coup n'est ajouté à la partie et envoyé au moteur qu'à ce moment. Fermer, mettre en veille ou arrêter le moteur pendant la pause oublie le coup en attente : la partie reste cohérente et l'ordinateur rejouera au réveil. Le moteur ne décide plus de chercher d'après le trait du FEN : `on_position` renvoie vrai quand c'est à l'ordinateur de jouer (couleur de l'enfant, pas de nulle à trancher).
+
+### Couleur, repères, en-tête
+
+Nouvelle partie : mode, puis « Vos pièces » (blancs ou noirs) sauf à deux joueurs. `game.color` est sauvegardé ; l'échiquier est retourné quand l'enfant a les noirs (repères inversés, touchers résolus dans l'orientation affichée) et l'ordinateur ouvre la partie. Les repères A–H et 1–8 se masquent dans Réglages (réglage `coords`, hors de la partie) ; Réglages regroupe aussi les niveaux. L'en-tête écrit les cases en majuscules et nomme la couleur qui vient de jouer ; une promotion précise la pièce.
