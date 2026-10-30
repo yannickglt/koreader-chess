@@ -21,40 +21,72 @@ int fcntl(int fd, int cmd, ...);
 int kill(int pid, int sig);
 int waitpid(int pid, int *status, int options);
 int setenv(const char *name, const char *value, int overwrite);
+int unsetenv(const char *name);
 ]]
 end
+ffi.cdef[[ long sysconf(int name); ]]
+
+-- Dans KOReader, le fork passe par ffi/util, qui arrête les threads susceptibles de tenir un
+-- verrou malloc avant fork() et exécute les hooks du frontend dans le fils. Hors KOReader
+-- (tests sur Mac ou en conteneur nu), fork direct.
+local ok_util, ffiUtil = pcall(require, "ffi/util")
+local run_in_subprocess = ok_util and type(ffiUtil) == "table" and ffiUtil.runInSubProcess or nil
 
 local C = ffi.C
 local O_NONBLOCK = ffi.os == "OSX" and 4 or 2048
 local MSG_NOSIGNAL = ffi.os == "OSX" and 0x80000 or 0x4000
 local EAGAIN = ffi.os == "OSX" and 35 or 11
+local SC_OPEN_MAX = ffi.os == "OSX" and 5 or 4
 local Transport = {}
 Transport.__index = Transport
+Transport.spawner = run_in_subprocess and "koreader" or "fork"
+
+-- Nombre maximal de descripteurs du processus (limite courante), borné pour que la fermeture
+-- dans le fils reste brève.
+local function max_fds()
+    local limit = tonumber(C.sysconf(SC_OPEN_MAX)) or 0
+    if limit < 1024 then limit = 1024 end
+    if limit > 65536 then limit = 65536 end
+    return limit
+end
+
+-- Exécuté dans le fils, entre fork et exec : la socket devient stdin/stdout, tous les autres
+-- descripteurs hérités de KOReader (écran, tactile, fichiers, réseau) sont fermés.
+local function exec_engine(path, argv, sv, limit)
+    C.dup2(sv[1], 0)
+    C.dup2(sv[1], 1)
+    for fd = 3, limit - 1 do C.close(fd) end
+    C.execv(path, argv)
+    C._exit(127)
+end
 
 function Transport.new(path)
     if type(path) ~= "string" or path:sub(1, 1) ~= "/" then return nil, "Chemin du moteur non absolu" end
     local argv = ffi.new("const char *[2]", path, nil)
     local libdir = path:match("^(.*)/[^/]+$")
-    local ld_path = libdir .. ":" .. (os.getenv("LD_LIBRARY_PATH") or "")
     local sv = ffi.new("int[2]")
     if C.socketpair(1, 1, 0, sv) ~= 0 then return nil, "socketpair: " .. ffi.errno() end
-    local pid = C.fork()
-    if pid < 0 then
-        C.close(sv[0]); C.close(sv[1])
-        return nil, "fork: " .. ffi.errno()
+    -- LD_LIBRARY_PATH est posé dans le parent juste avant le fork et restauré aussitôt après :
+    -- le fils hérite de l'environnement sans rien allouer entre fork et exec.
+    local previous = os.getenv("LD_LIBRARY_PATH")
+    local linux = ffi.os == "Linux"
+    local limit = max_fds()
+    if linux then C.setenv("LD_LIBRARY_PATH", previous and (libdir .. ":" .. previous) or libdir, 1) end
+    local pid, err
+    if run_in_subprocess then
+        pid, err = run_in_subprocess(function() exec_engine(path, argv, sv, limit) end)
+    else
+        pid = C.fork()
+        if pid == 0 then exec_engine(path, argv, sv, limit) end
     end
-    if pid == 0 then
-        C.close(sv[0])
-        C.dup2(sv[1], 0)
-        C.dup2(sv[1], 1)
-        C.close(sv[1])
-        if ffi.os == "Linux" then
-            C.setenv("LD_LIBRARY_PATH", ld_path, 1)
-        end
-        C.execv(path, argv)
-        C._exit(127)
+    if linux then
+        if previous then C.setenv("LD_LIBRARY_PATH", previous, 1) else C.unsetenv("LD_LIBRARY_PATH") end
     end
     C.close(sv[1])
+    if not pid or pid < 0 then
+        C.close(sv[0])
+        return nil, "fork: " .. tostring(err or ffi.errno())
+    end
     local flags = C.fcntl(sv[0], 3)
     if flags < 0 or C.fcntl(sv[0], 4, ffi.new("int", bit.bor(flags, O_NONBLOCK))) < 0 then
         C.close(sv[0]); C.kill(pid, 9); C.waitpid(pid, nil, 0)

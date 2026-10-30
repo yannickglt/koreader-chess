@@ -116,6 +116,8 @@ function Chess:startEngine()
         return false
     end
     self.transport = transport
+    -- Une partie reprise d'une sauvegarde est contrôlée à la première position reçue.
+    self.validate_save = #self.game.moves > 0
     self.engine = Engine.new(transport,
         function(fen, legal, in_check) return self:acceptPosition(fen, legal, in_check) end,
         function(move) self:engineMoved(move) end,
@@ -147,6 +149,19 @@ function Chess:acceptPosition(fen, legal, in_check)
     if self.engine and self.engine.ready_time and not self.engine.ready_logged then
         self.engine.ready_logged = true
         logger.info(string.format("chess: moteur prêt en %d ms", time.to_ms(self.engine.ready_time)))
+    end
+    if self.validate_save then
+        self.validate_save = false
+        if not self.game:consistent() then
+            -- Stockfish ignore en silence un coup illégal : la liste sauvegardée ne décrit plus la position.
+            logger.warn("chess: sauvegarde incohérente, nouvelle partie")
+            self.game = Game.new(nil, self.game.level, {mode = self.game.mode})
+            self.selected, self.destinations, self.hint, self.pending_draw_decision = nil, nil, nil, false
+            self:save()
+            UIManager:show(InfoMessage:new{text = "La partie sauvegardée est illisible : nouvelle partie."})
+            if self.engine then self.engine:play(self.game.moves) end
+            return false
+        end
     end
     local result = self.game:result()
     local computer_turn = self.game.turn == "b" and not self:twoPlayers()
@@ -197,7 +212,7 @@ function Chess:openBoard()
 end
 
 function Chess:closeDialogs()
-    for _, name in ipairs({"dialog", "promotion_dialog", "level_dialog", "mode_dialog"}) do
+    for _, name in ipairs({"board_dialog", "promotion_dialog", "level_dialog", "mode_dialog"}) do
         if self[name] then UIManager:close(self[name]); self[name] = nil end
     end
 end
@@ -232,6 +247,8 @@ function Chess:statusText()
         return "Je cherche un conseil…"
     elseif self.waiting then
         return (not two and self.game.fen and self.game.turn == "b") and "L'ordinateur réfléchit…" or "Un instant…"
+    elseif not self.engine then
+        return "Moteur arrêté · touchez l'échiquier"
     end
     local text
     if two then
@@ -270,7 +287,11 @@ function Chess:label(square)
     if self.selected == square then return "•" .. piece end
     if self.hint and self.selected == self.hint:sub(1, 2) and self.hint:sub(3, 4) == square then return "★" .. piece end
     if self.destinations and self.destinations[square] then
-        return (self.game.board[square] and "×" or "○") .. piece
+        -- Prise en passant : la case d'arrivée est vide mais le pion change de colonne.
+        local mover = self.selected and self.game.board[self.selected]
+        local capture = self.game.board[square] ~= nil
+            or (mover ~= nil and mover:lower() == "p" and square:sub(1, 1) ~= self.selected:sub(1, 1))
+        return (capture and "×" or "○") .. piece
     end
     return piece
 end
@@ -306,7 +327,7 @@ function Chess:render()
     local signature = table.concat({table.concat(labels), last_from or "", last_to or "", status,
         tostring(self.game.level), tostring(self.game.mode), tostring(human_turn), tostring(can_undo),
         tostring(can_claim), tostring(self.pending_draw_decision)}, "|")
-    if self.dialog and self.render_signature == signature then return end
+    if self.board_dialog and self.render_signature == signature then return end
     local geometry = self:geometry()
     local buttons = {}
     for row = 1, 8 do
@@ -353,8 +374,8 @@ function Chess:render()
         title = (mode_names[self.game.mode] or "Échecs") .. " · " .. status,
         buttons = buttons, dismissable = false, width = geometry.width,
     }
-    if self.dialog then UIManager:close(self.dialog) end
-    self.dialog = new_dialog
+    if self.board_dialog then UIManager:close(self.board_dialog) end
+    self.board_dialog = new_dialog
     self.render_signature = signature
     UIManager:show(new_dialog)
 end
@@ -395,9 +416,9 @@ function Chess:setSelection(square)
     self.destinations = square and self.game:destinations(square) or nil
     if square then touched[square] = true end
     for destination in pairs(self.destinations or {}) do touched[destination] = true end
-    if not self.dialog then return end
+    if not self.board_dialog then return end
     for current in pairs(touched) do
-        local button = self.dialog.buttontable:getButtonById(current)
+        local button = self.board_dialog.buttontable:getButtonById(current)
         if button then
             button:setText(self:label(current), button.width)
             button:refresh()
@@ -406,8 +427,9 @@ function Chess:setSelection(square)
 end
 
 function Chess:tapSquare(square)
+    -- Moteur arrêté (délai dépassé, échec de lancement) : un toucher le relance, quel que soit le trait.
+    if not self.engine and not self.game:result() then self:startEngine(); return end
     if not self:humanTurn() then return end
-    if not self.engine then self:startEngine(); return end
     local piece = self.game.board[square]
     local own = piece ~= nil and piece:match(self.game.turn == "w" and "%u" or "%l") ~= nil
     if not self.selected then

@@ -67,6 +67,19 @@ local insufficient = Game.new()
 insufficient:update("4k3/8/8/8/8/8/8/4K3 w - - 0 1", {"e1e2"}, false)
 eq(insufficient:result(), "materiel")
 
+-- cohérence entre la liste des coups et la position renvoyée par le moteur
+local consistent = Game.new({"e2e4", "e7e5"})
+eq(consistent:consistent(), true) -- pas encore de position
+consistent:update("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2", {"g1f3"}, false)
+eq(consistent:consistent(), true)
+local skipped = Game.new({"e2e4", "e7e5", "e2e5"}) -- forme valide, coup illégal ignoré par Stockfish
+eq(#skipped.moves, 3)
+skipped:update("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2", {"g1f3"}, false)
+eq(skipped:consistent(), false)
+local shifted = Game.new({"e2e4", "e7e5", "g1f3", "b8c6"})
+shifted:update("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2", {"g1f3"}, false)
+eq(shifted:consistent(), false) -- trait correct mais numéro de coup décalé
+
 -- destinations et dernier coup
 local dest = Game.new()
 dest:update(start, {"e2e4", "e2e3", "g1f3", "g1h3"}, false)

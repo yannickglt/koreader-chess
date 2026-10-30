@@ -5,7 +5,7 @@ local MOVE = "^[a-h][1-8][a-h][1-8][qrbn]?$"
 local START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 local function parse_fen(fen)
-    local placement, turn, castling, ep, halfmove = fen:match("^(%S+) (%S+) (%S+) (%S+) (%d+)")
+    local placement, turn, castling, ep, halfmove, fullmove = fen:match("^(%S+) (%S+) (%S+) (%S+) (%d+)%s*(%d*)")
     if not placement or (turn ~= "w" and turn ~= "b") then return nil, "FEN invalide" end
     local board = {}
     local rank = 8
@@ -28,7 +28,8 @@ local function parse_fen(fen)
         rank = rank - 1
     end
     if rank ~= 0 then return nil, "Nombre de rangées invalide" end
-    return {board = board, turn = turn, halfmove = tonumber(halfmove), placement = placement, castling = castling, ep = ep}
+    return {board = board, turn = turn, halfmove = tonumber(halfmove), fullmove = tonumber(fullmove),
+        placement = placement, castling = castling, ep = ep}
 end
 
 -- `moves` : liste de coups UCI déjà joués ; `options.keys[i]` : clé de répétition de la
@@ -80,6 +81,7 @@ function Game:update(fen, legal, in_check)
     local state, err = parse_fen(fen)
     if not state then return nil, err end
     self.fen, self.board, self.turn, self.halfmove = fen, state.board, state.turn, state.halfmove
+    self.fullmove = state.fullmove
     self.legal, self.in_check = legal, in_check
     local ep = state.ep
     if ep ~= "-" then
@@ -116,6 +118,15 @@ function Game:undo(count)
     self.repetitions, self.halfmove = 0, 0
     self.turn = #self.moves % 2 == 0 and "w" or "b"
     return true
+end
+
+-- Vrai si la position reçue du moteur correspond à la liste des coups : Stockfish ignore en
+-- silence un coup illégal dans `position startpos moves …`, ce qui décale trait et numéro de coup.
+function Game:consistent()
+    if not self.fen then return true end
+    local expected_turn = #self.moves % 2 == 0 and "w" or "b"
+    local expected_fullmove = math.floor(#self.moves / 2) + 1
+    return self.turn == expected_turn and (self.fullmove == nil or self.fullmove == expected_fullmove)
 end
 
 function Game:last_move()

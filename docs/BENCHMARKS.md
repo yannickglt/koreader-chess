@@ -27,3 +27,14 @@ Après l'ajout des cases carrées, des marqueurs, de l'annulation, de l'indice, 
 Le chiffre ARM vient toujours d'une **émulation sur Mac** ; la Tolino n'a pas été mesurée.
 
 Vérifications statiques des binaires ARM (`readelf` de la chaîne kobov5, exécuté dans Docker) : `stockfish` demande GLIBC_2.34 au plus, comme le `luajit` du paquet KOReader ; la `libstdc++.so.6` du plugin demande GLIBC_2.35 et fournit GLIBCXX_3.4.33, identique à celle livrée dans `koreader/libs` ; la chaîne kobov5 est construite sur glibc 2.35. `libgcc_s.so.1` a été débarrassée de ses symboles de débogage (2,9 Mo → 100 Ko) ; `scripts/build-arm.sh` le fait désormais à la reconstruction.
+
+### Après la revue Codex (même soir)
+
+Corrections : champ `board_dialog` (ReaderUI transmet `dialog = ReaderUI` aux plugins), relance du moteur par un toucher quel que soit le trait, fork via `ffiUtil.runInSubProcess` avec fermeture des descripteurs hérités et `LD_LIBRARY_PATH` posé avant le fork, contrôle de cohérence de la sauvegarde, marqueur de prise en passant.
+
+| Environnement | Commande | Résultat |
+|---|---|---|
+| Mac ARM64, Stockfish 16 macOS | `scripts/test.sh` | 8/8, transport en mode `fork` |
+| Linux ARMv7 émulé, LuaJIT, `ffi/posix_h.lua`, `ffi/util.lua` et `libs/libkoreader-lfs.so` du paquet kobov5 2026.07.1 | `scripts/test-arm-emulated.sh` | 8/8, transport en mode `koreader` (runInSubProcess), bench 43 516 nœuds en 346 ms |
+
+Le mode `koreader` du transport n'a été exercé qu'en émulation ; sur la Tolino, vérifier en plus que les hooks de fork du frontend (threads, descripteurs) se comportent comme prévu.

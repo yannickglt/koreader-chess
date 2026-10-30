@@ -38,9 +38,13 @@ Une nouvelle partie commence par le choix entre « Apprentissage » (Annuler le 
 
 Fermer, Annuler le coup, Réclamer la nulle et Nouvelle partie (dès qu'un coup a été joué) passent par une `ConfirmBox` avec les réponses « Oui » et « Non », pour qu'un tapotement maladroit ne fasse rien perdre. Le choix du niveau et l'indice n'en ont pas : ils ne perdent rien. L'échiquier à sa position de départ démarre une nouvelle partie sans question.
 
+### Processus moteur
+
+Dans KOReader, Stockfish est lancé par `ffiUtil.runInSubProcess`, qui exécute les hooks du frontend avant et après `fork()` (arrêt des threads susceptibles de tenir un verrou malloc) et place le fils à basse priorité ; hors KOReader, fork direct. Entre fork et exec, le fils relie la socket à stdin/stdout et ferme tous les autres descripteurs hérités (écran, tactile, fichiers, réseau). `LD_LIBRARY_PATH` est posé dans le parent juste avant le fork et restauré aussitôt après, pour que le fils n'alloue rien avant `execv`. Le plugin garde un champ `board_dialog` et non `dialog` : depuis un livre, ReaderUI transmet `dialog = ReaderUI` aux plugins, et le fermer fermerait le lecteur.
+
 ### Garde-fous
 
-Le sondage du moteur (50 ms) ne tourne que quand une réponse est attendue ; au-delà de 20 s sans réponse, le processus est arrêté et un message invite à toucher l'échiquier pour le relancer. Les temps de démarrage, de recherche et de conseil sont écrits dans le journal KOReader (lignes `chess: …`) pour les mesures sur l'appareil.
+Le sondage du moteur (50 ms) ne tourne que quand une réponse est attendue ; au-delà de 20 s sans réponse, le processus est arrêté et un message invite à toucher l'échiquier pour le relancer, quel que soit le trait. À la reprise d'une sauvegarde, la première position reçue est comparée à la liste des coups (trait et numéro de coup) : Stockfish ignore en silence un coup illégal, et une liste incohérente repart sur une nouvelle partie avec un message. Les clés de répétition sauvegardées sont reprises telles quelles ; si elles manquent, le compte repart de la position courante. Les temps de démarrage, de recherche et de conseil sont écrits dans le journal KOReader (lignes `chess: …`) pour les mesures sur l'appareil.
 
 ### Maquette
 

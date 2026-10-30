@@ -26,13 +26,15 @@ Sur la liseuse, depuis le plugin Terminal de KOReader ou SSH (à activer seuleme
 
 ## 3. Premier lancement
 
+- Ouvrir Échecs depuis le gestionnaire de fichiers, puis depuis un livre ouvert : dans les deux cas, fermer l'échiquier puis fermer le livre doit laisser KOReader intact (le plugin reçoit `dialog = ReaderUI` depuis un livre).
 - L'échiquier apparaît-il ? Les glyphes sont-ils rendus (FreeSerif) et lisibles ? Les cases sont-elles carrées, la boîte entière sans défilement, en portrait puis en paysage ?
 - Relever dans `/mnt/onboard/.adds/koreader/crash.log` les lignes `chess: moteur prêt en N ms` (lancement et chargement du réseau NNUE), `chess: coup de l'ordinateur … N ms`, `chess: conseil … N ms`.
-- Si le moteur ne démarre pas : message à l'écran et erreur `Transport` ou `Stockfish` dans crash.log. Vérifier alors l'interpréteur ELF, la glibc, et que le dossier `bin` du plugin est bien ajouté à `LD_LIBRARY_PATH` par le plugin.
+- Si le moteur ne démarre pas ou cesse de répondre : message à l'écran, titre « Moteur arrêté · touchez l'échiquier », erreur `Transport` ou `Stockfish` dans crash.log ; un toucher sur l'échiquier doit le relancer, quel que soit le trait.
+- `ls -l /proc/$(pidof stockfish)/fd` : seuls 0, 1 (la socket) et 2 doivent être ouverts, aucun descripteur d'écran, de tactile ni de fichier KOReader. Vérifier alors l'interpréteur ELF, la glibc, et que le dossier `bin` du plugin est bien ajouté à `LD_LIBRARY_PATH` par le plugin.
 
 ## 4. Jeu
 
-- Dix coups à chaque niveau ; noter le temps ressenti par coup, le flash à chaque coup (acceptable ou non), la lisibilité des marqueurs `•`, `○`, `×`, `★` et du surlignage du dernier coup.
+- Dix coups à chaque niveau ; noter le temps ressenti par coup, le flash à chaque coup (acceptable ou non), la lisibilité des marqueurs `•`, `○`, `×`, `★` et du surlignage du dernier coup. Stockfish tourne en `SCHED_BATCH` à priorité réduite (héritage de `runInSubProcess`) : comparer les temps du journal (`chess: coup de l'ordinateur … N ms`) au temps demandé (100 à 500 ms selon le niveau), en particulier pendant un rafraîchissement d'écran.
 - Essayer roque, prise en passant, promotion, annulation, indice, réclamation de nulle, nouvelle partie, changement de niveau en cours de partie.
 - Mémoire pendant une partie : `grep VmRSS /proc/$(pidof stockfish)/status`.
 
