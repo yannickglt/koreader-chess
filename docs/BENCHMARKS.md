@@ -51,3 +51,15 @@ Après le remplacement de la `ButtonDialog` par `boardwidget.lua` (rafraîchisse
 | Linux ARMv7 émulé (Docker), LuaJIT, `ffi/posix_h.lua`, `ffi/util.lua` du paquet kobov5 2026.07.1, Stockfish ARM du dépôt | `scripts/test-arm-emulated.sh` | 8/8, transport `koreader`, bench 43 516 nœuds en 314 ms (138 585 nœuds/s) |
 
 Le test d'interface vérifie, sur la géométrie simulée de la Tolino (cases de 147 px, échiquier de 1176 px, bande de 42 px), qu'une sélection ne rafraîchit que la boîte englobante des cases touchées, qu'un coup ne provoque aucun rendu avant la confirmation du moteur, et que l'ouverture est le seul rafraîchissement complet. Le nombre réel de flashs, la lisibilité des marqueurs dessinés et la durée des mises à jour partielles sur Kaleido restent **à mesurer sur la Tolino**.
+
+### Premiers temps relevés sur la Tolino (journal `crash.log`, 30 octobre 2026, 22 h 41 – 22 h 44)
+
+Mesures **réelles**, première version (ButtonDialog), niveau avec coups au hasard (Découverte ou Initiation, temps demandé 100 à 150 ms par recherche) :
+
+| Ligne du journal | Valeur |
+|---|---:|
+| `chess: moteur prêt` (lancement de Stockfish et chargement du réseau NNUE) | 848 ms puis 796 ms |
+| `chess: coup de l'ordinateur … (search)` : sept recherches | 902 à 1 047 ms |
+| `chess: coup de l'ordinateur … (random)` : trois coups | 0 ms |
+
+Le temps de recherche mesuré par le plugin (de l'envoi de `go movetime` à la lecture de `bestmove`) est six à dix fois supérieur au temps demandé. Il inclut l'attente du sondage (50 ms) et surtout le temps pendant lequel la boucle d'interface KOReader est occupée : avec la ButtonDialog, la reconstruction et le rafraîchissement complet de la boîte suivaient immédiatement le coup de l'enfant, pendant la recherche, et Stockfish tourne en `SCHED_BATCH` à priorité réduite. À remesurer avec le widget plein écran (rafraîchissement partiel de deux cases et de l'en-tête) avant d'incriminer le processeur. Aucune erreur ni trace du plugin dans le journal.
