@@ -1,6 +1,6 @@
 # Vérifications et mesures locales — 30 octobre 2026
 
-Le code a été testé sur Mac avec LuaJIT 2.1 construit localement et Stockfish 16 compilé pour macOS ARM64. La suite couvre le modèle de partie, le protocole UCI, le transport non bloquant, l'interface tactile simulée, une partie contre le vrai moteur, roque, prise en passant, les quatre promotions et l'arrêt pendant une recherche. Les mêmes tests ont ensuite passé dans un conteneur Linux ARM 32 bits émulé avec le LuaJIT extrait du paquet officiel KOReader `kobov5` 2026.07.1 et le binaire Stockfish ARM préparé ici.
+Le code a été testé sur Mac avec LuaJIT 2.1 construit localement et Stockfish 16 compilé pour macOS ARM64. La suite couvre le modèle de partie, le protocole UCI, le transport non bloquant, l'interface tactile simulée, une partie contre le vrai moteur, roque, prise en passant, les quatre promotions, les nulles réclamables et l'arrêt pendant une recherche. Les mêmes tests ont ensuite passé dans un conteneur Linux ARM 32 bits émulé avec le LuaJIT et les déclarations POSIX extraits du paquet officiel KOReader `kobov5` 2026.07.1 et le binaire Stockfish ARM préparé ici. Les glyphes d'échecs sont présents dans FreeSerif, livré avec ce paquet.
 
 | Environnement | Commande | Résultat |
 |---|---|---:|

@@ -72,16 +72,7 @@ function Chess:startEngine()
     self.waiting = true
     self.engine = Engine.new(transport,
         function(fen, legal, in_check)
-            local ok, update_err = self.game:update(fen, legal, in_check)
-            if not ok then
-                self:stopEngine()
-                UIManager:show(InfoMessage:new{text = update_err})
-                return false
-            end
-            self:save()
-            self.waiting = self.game.turn == "b" and not self.game:result()
-            self:render()
-            return self.waiting
+            return self:acceptPosition(fen, legal, in_check)
         end,
         function(move)
             self.game:append(move)
@@ -91,6 +82,22 @@ function Chess:startEngine()
     self.engine:start(levels[self.game.level] or levels[1], self.game.moves)
     UIManager:scheduleIn(0.05, Chess.poll, self)
     return true
+end
+
+function Chess:acceptPosition(fen, legal, in_check)
+    local ok, update_err = self.game:update(fen, legal, in_check)
+    if not ok then
+        self:stopEngine()
+        UIManager:show(InfoMessage:new{text = update_err})
+        return false
+    end
+    local result = self.game:result()
+    self.pending_draw_decision = not result and self.game.turn == "b" and self.game:can_claim_draw()
+    self.waiting = not result and self.game.turn == "b" and not self.pending_draw_decision
+    self:save()
+    self:render()
+    if result then self:stopEngine() end
+    return self.waiting
 end
 
 function Chess:poll()
@@ -133,7 +140,7 @@ local result_text = {
 function Chess:render()
     if not self.opened then return end
     local result = self.game:result()
-    local status = result and result_text[result] or (self.waiting and "L'ordinateur réfléchit…" or "À vous de jouer")
+    local status = result and result_text[result] or (self.pending_draw_decision and "Nulle possible · choisir" or (self.waiting and "L'ordinateur réfléchit…" or "À vous de jouer"))
     local buttons = {}
     for row = 1, 8 do
         buttons[row] = {}
@@ -156,14 +163,35 @@ function Chess:render()
         {text = "Fermer", callback = function() self:closeBoard() end},
     }
     if self.game:can_claim_draw() and not result then
-        buttons[10] = {{text = "Réclamer la nulle", callback = function()
-            self.game.claimed_draw = true; self.waiting = false; self:stopEngine(); self:save(); self:render()
-        end}}
+        buttons[10] = {{text = "Réclamer la nulle", callback = function() self:claimDraw() end}}
+        if self.pending_draw_decision then
+            buttons[10][2] = {text = "Continuer", callback = function() self:continueAfterClaim() end}
+        end
     end
     local new_dialog = ButtonDialog:new{title = "Échecs · " .. status, buttons = buttons, dismissable = false, width_factor = 0.96}
     if self.dialog then UIManager:close(self.dialog) end
     self.dialog = new_dialog
     UIManager:show(new_dialog)
+end
+
+function Chess:claimDraw()
+    if not self.game:can_claim_draw() or self.game:result() then return end
+    self.game.claimed_draw = true
+    self.pending_draw_decision = false
+    self.waiting = false
+    self:stopEngine()
+    self:save()
+    self:render()
+end
+
+function Chess:continueAfterClaim()
+    if not self.pending_draw_decision then return end
+    if not self.engine then self:startEngine(); return end
+    self.pending_draw_decision = false
+    self.waiting = true
+    self:render()
+    self.engine:send("go movetime " .. levels[self.game.level].movetime)
+    UIManager:scheduleIn(0.05, Chess.poll, self)
 end
 
 function Chess:setSelection(square)
@@ -231,6 +259,7 @@ function Chess:confirmNewGame()
             local level = self.game.level
             self.game = Game.new(nil, level)
             self.selected = nil
+            self.pending_draw_decision = false
             self:save()
             self.waiting = true
             self:render()
@@ -251,7 +280,7 @@ function Chess:onSuspend()
 end
 
 function Chess:onResume()
-    if self.opened then self:startEngine() end
+    if self.opened and not self.game:result() then self:startEngine() end
 end
 
 function Chess:onCloseWidget()

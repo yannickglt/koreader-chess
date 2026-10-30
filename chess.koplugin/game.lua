@@ -25,7 +25,7 @@ local function parse_fen(fen)
         rank = rank - 1
     end
     if rank ~= 0 then return nil, "Nombre de rangées invalide" end
-    return {board = board, turn = turn, halfmove = tonumber(halfmove), key = table.concat({placement, turn, castling, ep}, " ")}
+    return {board = board, turn = turn, halfmove = tonumber(halfmove), placement = placement, castling = castling, ep = ep}
 end
 
 function Game.new(moves, level, history)
@@ -43,11 +43,25 @@ function Game:update(fen, legal, in_check)
     if not state then return nil, err end
     self.fen, self.board, self.turn, self.halfmove = fen, state.board, state.turn, state.halfmove
     self.legal, self.in_check = legal, in_check
+    local ep = state.ep
+    if ep ~= "-" then
+        local pawn = state.turn == "w" and "P" or "p"
+        local can_capture = false
+        for _, move in ipairs(legal) do
+            local from = move:sub(1, 2)
+            if move:sub(3, 4) == ep and from:sub(1, 1) ~= ep:sub(1, 1) and state.board[from] == pawn then
+                can_capture = true
+                break
+            end
+        end
+        if not can_capture then ep = "-" end
+    end
+    local key = table.concat({state.placement, state.turn, state.castling, ep}, " ")
     if self.last_counted_ply ~= #self.moves then
-        self.seen[state.key] = (self.seen[state.key] or 0) + 1
+        self.seen[key] = (self.seen[key] or 0) + 1
         self.last_counted_ply = #self.moves
     end
-    self.repetitions = self.seen[state.key]
+    self.repetitions = self.seen[key] or 0
     return true
 end
 

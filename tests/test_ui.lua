@@ -57,5 +57,17 @@ chess:tapSquare("e4")
 assert(played == "e2e4")
 assert(chess.selected == nil)
 assert(settings.data.game.moves[1] == "e2e4")
+local searches = 0
+chess.engine = {send = function(_, command) if command == "go movetime 150" then searches = searches + 1 end end}
+local should_search = chess:acceptPosition("4k3/7p/8/8/8/8/P7/4K3 b - - 100 51", {"e8e7"}, false)
+assert(should_search == false and chess.pending_draw_decision and searches == 0)
+chess:continueAfterClaim()
+assert(searches == 1 and chess.waiting and not chess.pending_draw_decision)
+chess:claimDraw()
+assert(chess.game:result() == "nulle_reclamee" and not chess.waiting)
+local stopped = false
+chess.transport = {close = function() stopped = true end}
+chess:onSuspend()
+assert(stopped and chess.transport == nil and chess.engine == nil and chess.waiting)
 chess:closeBoard()
 print("ui: OK")
