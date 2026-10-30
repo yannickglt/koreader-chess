@@ -16,5 +16,11 @@ cp -L "$KOBOV5_TOOLCHAIN/arm-kobov5-linux-gnueabihf/sysroot/lib/libatomic.so.1" 
 cp -L "$KOBOV5_TOOLCHAIN/arm-kobov5-linux-gnueabihf/sysroot/lib/libstdc++.so.6" chess.koplugin/bin/libstdc++.so.6
 cp -L "$KOBOV5_TOOLCHAIN/arm-kobov5-linux-gnueabihf/sysroot/lib/libgcc_s.so.1" chess.koplugin/bin/libgcc_s.so.1
 chmod 755 chess.koplugin/bin/stockfish
+chmod 644 chess.koplugin/bin/lib*.so*
+docker run --rm --platform linux/amd64 \
+    -v "$PWD/chess.koplugin/bin:/bin-chess" -v "$KOBOV5_TOOLCHAIN:/toolchain:ro" \
+    debian:trixie-slim /toolchain/bin/arm-kobov5-linux-gnueabihf-strip --strip-unneeded \
+    /bin-chess/libatomic.so.1 /bin-chess/libstdc++.so.6 /bin-chess/libgcc_s.so.1
+chmod 555 chess.koplugin/bin/lib*.so*
 file chess.koplugin/bin/stockfish
-shasum -a 256 chess.koplugin/bin/stockfish
+shasum -a 256 chess.koplugin/bin/*

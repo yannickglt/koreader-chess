@@ -1,6 +1,9 @@
 local Game = {}
 Game.__index = Game
 
+local MOVE = "^[a-h][1-8][a-h][1-8][qrbn]?$"
+local START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
 local function parse_fen(fen)
     local placement, turn, castling, ep, halfmove = fen:match("^(%S+) (%S+) (%S+) (%S+) (%d+)")
     if not placement or (turn ~= "w" and turn ~= "b") then return nil, "FEN invalide" end
@@ -28,14 +31,49 @@ local function parse_fen(fen)
     return {board = board, turn = turn, halfmove = tonumber(halfmove), placement = placement, castling = castling, ep = ep}
 end
 
-function Game.new(moves, level, history)
-    history = history or {}
-    return setmetatable({moves = moves or {}, level = level or 1, seen = history.seen or {}, last_counted_ply = history.last_counted_ply, legal = {}, board = {}, turn = "w"}, Game)
+-- `moves` : liste de coups UCI déjà joués ; `options.keys[i]` : clé de répétition de la
+-- position après i-1 coups ; `options.mode` : "apprentissage" (annulation et indice), "partie"
+-- (sans aide) ou "deux_joueurs" (les deux couleurs sur l'écran). Une sauvegarde corrompue repart
+-- d'une partie vide.
+local MODES = {apprentissage = true, partie = true, deux_joueurs = true}
+
+function Game.new(moves, level, options)
+    options = options or {}
+    local game = setmetatable({
+        moves = {}, level = level, keys = {}, legal = {}, board = {}, turn = "w",
+        mode = MODES[options.mode] and options.mode or "apprentissage",
+    }, Game)
+    if type(moves) == "table" then
+        for _, move in ipairs(moves) do
+            if type(move) ~= "string" or not move:match(MOVE) then
+                game.moves = {}
+                break
+            end
+            game.moves[#game.moves + 1] = move
+        end
+    end
+    if type(options.keys) == "table" then
+        for i = 1, #game.moves do
+            local key = options.keys[i]
+            if type(key) ~= "string" then break end
+            game.keys[i] = key
+        end
+    end
+    game.turn = #game.moves % 2 == 0 and "w" or "b"
+    -- Position initiale affichée avant la première réponse du moteur.
+    if #game.moves == 0 then game.board = parse_fen(START).board end
+    return game
 end
 
 function Game:append(move)
-    assert(type(move) == "string" and move:match("^[a-h][1-8][a-h][1-8][qrbn]?$"), "Coup UCI invalide")
+    assert(type(move) == "string" and move:match(MOVE), "Coup UCI invalide")
     self.moves[#self.moves + 1] = move
+end
+
+local function forget_keys_after(keys, ply)
+    for i in pairs(keys) do
+        if i > ply then keys[i] = nil end
+    end
 end
 
 function Game:update(fen, legal, in_check)
@@ -57,12 +95,41 @@ function Game:update(fen, legal, in_check)
         if not can_capture then ep = "-" end
     end
     local key = table.concat({state.placement, state.turn, state.castling, ep}, " ")
-    if self.last_counted_ply ~= #self.moves then
-        self.seen[key] = (self.seen[key] or 0) + 1
-        self.last_counted_ply = #self.moves
+    local ply = #self.moves + 1
+    self.keys[ply] = key
+    forget_keys_after(self.keys, ply)
+    local count = 0
+    for i = 1, ply do
+        if self.keys[i] == key then count = count + 1 end
     end
-    self.repetitions = self.seen[key] or 0
+    self.repetitions = count
     return true
+end
+
+-- Retire les `count` derniers coups. La position doit ensuite être redemandée au moteur.
+function Game:undo(count)
+    count = math.min(count or 1, #self.moves)
+    if count < 1 then return false end
+    for _ = 1, count do table.remove(self.moves) end
+    forget_keys_after(self.keys, #self.moves + 1)
+    self.fen, self.legal, self.in_check, self.claimed_draw = nil, {}, false, nil
+    self.repetitions, self.halfmove = 0, 0
+    self.turn = #self.moves % 2 == 0 and "w" or "b"
+    return true
+end
+
+function Game:last_move()
+    local move = self.moves[#self.moves]
+    if not move then return nil end
+    return move:sub(1, 2), move:sub(3, 4)
+end
+
+function Game:destinations(from)
+    local result = {}
+    for _, move in ipairs(self.legal or {}) do
+        if move:sub(1, 2) == from then result[move:sub(3, 4)] = true end
+    end
+    return result
 end
 
 function Game:promotions(from, to)

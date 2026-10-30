@@ -7,6 +7,8 @@ end
 
 local game = Game.new()
 local start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+eq(game.board.e2, "P") -- position initiale avant la réponse du moteur
+eq(game.fen, nil)
 game:update(start, { "e2e4", "g1f3" }, false)
 eq(game.board.e2, "P")
 eq(game.board.e4, nil)
@@ -40,8 +42,9 @@ for i = 1, 5 do
 end
 eq(repetition:can_claim_draw(), true)
 eq(repetition:result(), "repetition")
-repetition:update(repeated, {"e1e2"}, false)
+repetition:update(repeated, {"e1e2"}, false) -- même pli : pas de double comptage
 eq(repetition.repetitions, 5)
+eq(#repetition.keys, 5)
 
 local ep_repetition = Game.new()
 ep_repetition:update("4k3/7p/8/8/4P3/8/P7/4K3 b - e3 0 1", {"e8e7"}, false)
@@ -63,5 +66,45 @@ eq(fifty:result(), "75_coups")
 local insufficient = Game.new()
 insufficient:update("4k3/8/8/8/8/8/8/4K3 w - - 0 1", {"e1e2"}, false)
 eq(insufficient:result(), "materiel")
+
+-- destinations et dernier coup
+local dest = Game.new()
+dest:update(start, {"e2e4", "e2e3", "g1f3", "g1h3"}, false)
+local d = dest:destinations("e2")
+eq(d.e4, true); eq(d.e3, true); eq(d.f3, nil)
+eq(dest:last_move(), nil)
+dest:append("e2e4")
+local from, to = dest:last_move()
+eq(from, "e2"); eq(to, "e4")
+
+-- annulation : les clés de répétition au-delà du pli sont oubliées
+local undo = Game.new()
+undo:update(start, {"e2e4"}, false)
+undo:append("e2e4")
+undo:update("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1", {"e7e5"}, false)
+undo:append("e7e5")
+undo:update("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2", {"g1f3"}, false)
+undo.claimed_draw = true
+eq(#undo.keys, 3)
+eq(undo:undo(2), true)
+eq(#undo.moves, 0)
+eq(undo.fen, nil)
+eq(undo.turn, "w")
+eq(undo.keys[2], nil); eq(undo.keys[3], nil)
+eq(undo.keys[1] ~= nil, true)
+eq(undo.claimed_draw, nil)
+eq(undo:result(), nil)
+eq(undo:undo(1), false)
+
+-- reprise d'une sauvegarde : coups et clés restaurés, sauvegarde corrompue ignorée
+local restored = Game.new({"e2e4", "e7e5"}, "facile", {keys = {"k1", "k2", 3}, mode = "partie"})
+eq(#restored.moves, 2); eq(restored.keys[1], "k1"); eq(restored.keys[2], "k2"); eq(restored.keys[3], nil)
+eq(restored.turn, "w"); eq(restored.level, "facile"); eq(restored.mode, "partie")
+eq(Game.new().mode, "apprentissage"); eq(Game.new(nil, nil, {mode = "autre"}).mode, "apprentissage")
+eq(Game.new(nil, nil, {mode = "deux_joueurs"}).mode, "deux_joueurs")
+local corrupt = Game.new({"e2e4", "zz"}, "facile", {keys = {"a", "b"}})
+eq(#corrupt.moves, 0)
+eq(next(corrupt.keys), nil)
+eq(corrupt.board.e2, "P")
 
 print("game: OK")
