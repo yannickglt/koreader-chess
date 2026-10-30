@@ -47,8 +47,9 @@ Les cinq premiers tests n'ont pas besoin de moteur ; les trois derniers (partie 
 ## Installation sur la liseuse (après accord explicite)
 
 1. Vérifier le binaire ARM dans `chess.koplugin/bin` (reconstruction : `docs/ARM.md`).
-2. Suivre `docs/VALIDATION.md` : contrôles préalables, copie, essais et mesures.
-3. En résumé : brancher la liseuse, vérifier que le volume est `/Volumes/eReader`, copier avec `cp -R chess.koplugin /Volumes/eReader/.adds/koreader/plugins/`, éjecter proprement, relancer KOReader, ouvrir **Outils → Plus d'outils → Échecs**.
+2. Construire l'archive : `./scripts/package.sh` produit `dist/chess.koplugin-<date>-<commit>.zip` et son SHA-256, à décompresser dans `.adds/koreader/plugins/` (le dossier `chess.koplugin` est à la racine de l'archive).
+3. Suivre `docs/VALIDATION.md` : contrôles préalables, copie, essais et mesures.
+4. En résumé : brancher la liseuse, vérifier que le volume est `/Volumes/eReader`, décompresser l'archive ou copier avec `cp -R chess.koplugin /Volumes/eReader/.adds/koreader/plugins/`, éjecter proprement, relancer KOReader, ouvrir **Outils → Plus d'outils → Échecs**.
 
 ## Licence
 
