@@ -1,0 +1,4 @@
+chess.koplugin/bin/stockfish
+chess.koplugin/bin/*.so.*
+*.o
+.DS_Store
