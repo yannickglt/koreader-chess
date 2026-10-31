@@ -9,7 +9,7 @@ jobs:
   tests:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: LuaJIT et Stockfish
         run: sudo apt-get update -qq && sudo apt-get install -y -qq luajit stockfish
       - name: Suite de tests (Stockfish de la distribution, transport en mode fork)
@@ -21,7 +21,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Archive installable
         run: ./scripts/package.sh
       - name: Release GitHub
