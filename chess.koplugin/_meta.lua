@@ -1,4 +1,5 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
 return {
-    fullname = "Échecs",
-    description = "Jouer hors ligne contre Stockfish.",
+    fullname = "Chess",
+    description = "Play offline against Stockfish. Interface in English or French.",
 }

@@ -48,7 +48,7 @@ Le sondage du moteur (50 ms) ne tourne que quand une réponse est attendue ; au-
 
 ### Maquette
 
-Maquette Claude Design des écrans de jeu, de choix du niveau et de fin de partie, plus le composant échiquier : https://claude.ai/artifact/RKhQNPGaBK5HzpK1a4LCLm (lien privé). Elle reprend la boîte KOReader en niveaux de gris à la résolution de l'écran ; elle ne remplace pas l'essai sur E Ink.
+Une maquette Claude Design (privée, non publiée) des écrans de jeu, des réglages, du choix du mode et de la couleur, de la partie avec les noirs, du mode deux joueurs, de la fin de partie et des confirmations, plus le composant échiquier, a servi à fixer la disposition. Elle reprend la boîte KOReader en niveaux de gris à la résolution de l'écran ; elle ne remplace pas l'essai sur E Ink.
 
 ## Retours de la Tolino, 30 octobre 2026, nuit
 
@@ -71,3 +71,8 @@ Dessinés par-dessus la case, la pièce ne bouge pas : cadre épais noir (côté
 ### Couleur, repères, en-tête
 
 Nouvelle partie : mode, puis « Vos pièces » (blancs ou noirs) sauf à deux joueurs. `game.color` est sauvegardé ; l'échiquier est retourné quand l'enfant a les noirs (repères inversés, touchers résolus dans l'orientation affichée) et l'ordinateur ouvre la partie. Les repères A–H et 1–8 se masquent dans Réglages (réglage `coords`, hors de la partie) ; Réglages regroupe aussi les niveaux. L'en-tête écrit les cases en majuscules et nomme la couleur qui vient de jouer ; une promotion précise la pièce.
+
+
+### Langue
+
+L'interface est en anglais par défaut et passe en français depuis Réglages (réglage `language` du plugin, indépendant de la langue de KOReader). `i18n.lua` garde les chaînes anglaises comme clés et un catalogue français ; `main.lua` passe chaque texte affiché par `T()`, les textes à paramètre étant formatés après traduction. Les identifiants internes (niveaux, modes, clés de sauvegarde) ne changent pas avec la langue. L'entrée de menu KOReader est construite au démarrage : elle change de langue au lancement suivant. La maquette montre les textes français.

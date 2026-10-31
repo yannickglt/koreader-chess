@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
 local Board = require("board")
 local BoardWidget = require("boardwidget")
 local ButtonDialog = require("ui/widget/buttondialog")
@@ -5,6 +6,7 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local Engine = require("engine")
 local Game = require("game")
+local I18n = require("i18n")
 local InfoMessage = require("ui/widget/infomessage")
 local LuaSettings = require("luasettings")
 local Transport = require("transport")
@@ -13,15 +15,17 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ffiUtil = require("ffi/util")
 local logger = require("logger")
 local time = require("ui/time")
+local T = I18n.translate
 
 -- `random` : probabilité qu'un coup de l'ordinateur soit tiré au hasard parmi les coups légaux.
 -- `skill` : Skill Level Stockfish (0 = le plus faible). `movetime` en millisecondes.
+-- Les noms et descriptions sont les chaînes anglaises traduites à l'affichage.
 local levels = {
-    {id = "decouverte", name = "Découverte", blurb = "joue souvent au hasard", skill = 0, movetime = 100, random = 0.6},
-    {id = "initiation", name = "Initiation", blurb = "se trompe parfois", skill = 0, movetime = 150, random = 0.3},
-    {id = "facile", name = "Facile", skill = 3, movetime = 250},
-    {id = "intermediaire", name = "Intermédiaire", skill = 8, movetime = 350},
-    {id = "difficile", name = "Difficile", skill = 15, movetime = 500},
+    {id = "decouverte", name = "Discovery", blurb = "often plays at random", skill = 0, movetime = 100, random = 0.6},
+    {id = "initiation", name = "Beginner", blurb = "sometimes slips", skill = 0, movetime = 150, random = 0.3},
+    {id = "facile", name = "Easy", skill = 3, movetime = 250},
+    {id = "intermediaire", name = "Intermediate", skill = 8, movetime = 350},
+    {id = "difficile", name = "Hard", skill = 15, movetime = 500},
 }
 local POLL_INTERVAL = 0.05
 local ENGINE_TIMEOUT = 20 -- secondes sans réponse du moteur avant de l'arrêter
@@ -39,6 +43,7 @@ local Chess = WidgetContainer:extend{name = "chess", is_doc_only = false}
 function Chess:init()
     math.randomseed(os.time())
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/chess.lua")
+    I18n.set(self.settings:readSetting("language") or "en")
     local saved = self.settings:readSetting("game") or {}
     self.game = Game.new(saved.moves, level_for(saved.level).id, {keys = saved.keys, mode = saved.mode, color = saved.color})
     if #self.game.moves > 0 and saved.claimed_draw then self.game.claimed_draw = true end
@@ -47,7 +52,7 @@ end
 
 function Chess:addToMainMenu(menu_items)
     menu_items.chess = {
-        text = "Échecs",
+        text = T("Chess"),
         sorting_hint = "more_tools",
         callback = function() self:openBoard() end,
     }
@@ -59,7 +64,7 @@ end
 
 -- Mode choisi à la création de la partie : seul le mode Apprentissage offre l'indice ; à deux
 -- joueurs, les deux couleurs se jouent sur l'écran et Stockfish ne sert qu'aux règles.
-local mode_names = {apprentissage = "Apprentissage", partie = "Partie", deux_joueurs = "Deux joueurs"}
+local mode_names = {apprentissage = "Learning", partie = "Game", deux_joueurs = "Two players"}
 
 function Chess:learning()
     return self.game.mode == "apprentissage"
@@ -121,12 +126,12 @@ function Chess:startEngine()
     self:stopEngine()
     local path = ffiUtil.realpath(self.path .. "/bin/stockfish")
     if not path or not ffiUtil.isExecutable(path) then
-        UIManager:show(InfoMessage:new{text = "Stockfish absent ou non exécutable dans chess.koplugin/bin/."})
+        UIManager:show(InfoMessage:new{text = T("Stockfish is missing or not executable in chess.koplugin/bin/.")})
         return false
     end
     local transport, err = Transport.new(path)
     if not transport then
-        UIManager:show(InfoMessage:new{text = "Impossible de lancer Stockfish : " .. err})
+        UIManager:show(InfoMessage:new{text = T("Could not start Stockfish: %s"):format(err)})
         return false
     end
     self.transport = transport
@@ -183,7 +188,7 @@ function Chess:acceptPosition(fen, legal, in_check)
             self.game = Game.new(nil, self.game.level, {mode = self.game.mode, color = self.game.color})
             self.selected, self.destinations, self.hint, self.pending_draw_decision = nil, nil, nil, false
             self:save()
-            UIManager:show(InfoMessage:new{text = "La partie sauvegardée est illisible : nouvelle partie."})
+            UIManager:show(InfoMessage:new{text = T("The saved game is unreadable: starting a new game.")})
             if self.engine then self.engine:play(self.game.moves) end
             return false
         end
@@ -219,7 +224,7 @@ function Chess:poll()
         logger.warn("chess: Stockfish ne répond pas, arrêt du moteur")
         self:stopEngine()
         self.waiting = false
-        UIManager:show(InfoMessage:new{text = "Stockfish ne répond pas. Touchez l'échiquier pour le relancer."})
+        UIManager:show(InfoMessage:new{text = T("Stockfish is not responding. Tap the board to restart it.")})
         self:render()
         return
     end
@@ -256,9 +261,9 @@ function Chess:closeBoard()
 end
 
 local result_text = {
-    pat = "Pat · partie nulle", materiel = "Matériel insuffisant · partie nulle",
-    repetition = "Cinq répétitions · partie nulle", ["75_coups"] = "75 coups · partie nulle",
-    nulle_reclamee = "Partie nulle",
+    pat = "Stalemate · draw", materiel = "Insufficient material · draw",
+    repetition = "Fivefold repetition · draw", ["75_coups"] = "75-move rule · draw",
+    nulle_reclamee = "Draw",
 }
 
 -- Première ligne de l'en-tête : à qui de jouer, ou ce que fait l'ordinateur.
@@ -267,47 +272,47 @@ function Chess:statusText()
     local two = self:twoPlayers()
     if result == "mat" then
         if two then
-            return self.game.turn == "b" and "Échec et mat · les blancs gagnent" or "Échec et mat · les noirs gagnent"
+            return self.game.turn == "b" and T("Checkmate · White wins") or T("Checkmate · Black wins")
         end
-        return self.game.turn ~= self.game.color and "Échec et mat · tu as gagné !" or "Échec et mat · l'ordinateur a gagné"
+        return self.game.turn ~= self.game.color and T("Checkmate · you win!") or T("Checkmate · the computer wins")
     elseif result then
-        return result_text[result]
+        return T(result_text[result])
     elseif self.pending_draw_decision then
-        return "Nulle possible · choisir"
+        return T("Draw available · choose")
     elseif self.hinting then
-        return "Je cherche un conseil…"
+        return T("Looking for a hint…")
     elseif self.waiting then
-        return (self.game.fen and self:computerTurn()) and "L'ordinateur réfléchit…" or "Un instant…"
+        return (self.game.fen and self:computerTurn()) and T("The computer is thinking…") or T("One moment…")
     elseif not self.engine then
-        return "Moteur arrêté · touchez l'échiquier"
+        return T("Engine stopped · tap the board")
     end
     local text
     if two then
-        text = self.game.turn == "w" and "Aux blancs de jouer" or "Aux noirs de jouer"
+        text = self.game.turn == "w" and T("White to move") or T("Black to move")
     else
-        text = "À vous de jouer"
+        text = T("Your move")
     end
-    if self.game.in_check then text = "Échec ! " .. text end
+    if self.game.in_check then text = T("Check! %s"):format(text) end
     return text
 end
 
-local piece_names = {q = "dame", r = "tour", b = "fou", n = "cavalier"}
+local piece_names = {q = "queen", r = "rook", b = "bishop", n = "knight"}
 
--- « E2 → E4 », « E7 → E8 (dame) » : cases en majuscules, comme les repères de l'échiquier.
+-- « E2 → E4 », « E7 → E8 (queen) » : cases en majuscules, comme les repères de l'échiquier.
 local function describe(move)
     local text = move:sub(1, 2):upper() .. " → " .. move:sub(3, 4):upper()
     local promotion = move:sub(5, 5)
-    if promotion ~= "" then text = text .. " (" .. piece_names[promotion] .. ")" end
+    if promotion ~= "" then text = text .. " (" .. T(piece_names[promotion]) .. ")" end
     return text
 end
 
 -- Seconde ligne : mode, niveau, dernier coup joué.
 function Chess:detailText()
-    local parts = {mode_names[self.game.mode] or "Échecs"}
-    if not self:twoPlayers() then parts[#parts + 1] = self:level().name end
+    local parts = {T(mode_names[self.game.mode] or "Chess")}
+    if not self:twoPlayers() then parts[#parts + 1] = T(self:level().name) end
     local move = self.game.moves[#self.game.moves]
     if move then
-        parts[#parts + 1] = (#self.game.moves % 2 == 1 and "Blancs : " or "Noirs : ") .. describe(move)
+        parts[#parts + 1] = T(#self.game.moves % 2 == 1 and "White: %s" or "Black: %s"):format(describe(move))
     end
     return table.concat(parts, " · ")
 end
@@ -359,19 +364,19 @@ function Chess:view()
             squares[square] = cell
         end
     end
-    local rows = {{{id = "new", text = "Nouvelle partie"}, {id = "settings", text = "Réglages"}, {id = "close", text = "Fermer"}}, {}}
+    local rows = {{{id = "new", text = T("New game")}, {id = "settings", text = T("Settings")}, {id = "close", text = T("Close")}}, {}}
     local row = rows[2]
     if self:learning() or self:twoPlayers() then
-        row[#row + 1] = {id = "undo", text = "Annuler le coup", enabled = can_undo}
+        row[#row + 1] = {id = "undo", text = T("Undo move"), enabled = can_undo}
     end
     if self:learning() then
-        row[#row + 1] = {id = "hint", text = "Indice", enabled = human_turn}
+        row[#row + 1] = {id = "hint", text = T("Hint"), enabled = human_turn}
     end
     if self.pending_draw_decision then
-        row[#row + 1] = {id = "continue", text = "Continuer"}
-        row[#row + 1] = {id = "claim", text = "Réclamer la nulle"}
+        row[#row + 1] = {id = "continue", text = T("Continue")}
+        row[#row + 1] = {id = "claim", text = T("Claim a draw")}
     else
-        row[#row + 1] = {id = "claim", text = "Réclamer la nulle", enabled = can_claim}
+        row[#row + 1] = {id = "claim", text = T("Claim a draw"), enabled = can_claim}
     end
     return {
         status = self:statusText(), detail = self:detailText(),
@@ -401,24 +406,24 @@ end
 -- ou qui quittent le jeu demandent une confirmation « Oui / Non », lisible par un enfant.
 function Chess:confirm(text, callback)
     UIManager:show(ConfirmBox:new{
-        text = text, ok_text = "Oui", cancel_text = "Non",
+        text = text, ok_text = T("Yes"), cancel_text = T("No"),
         ok_callback = callback,
     })
 end
 
 function Chess:confirmClose()
-    self:confirm("Fermer le jeu d'échecs ? La partie est gardée pour la prochaine fois.", function() self:closeBoard() end)
+    self:confirm(T("Close the chess game? The game is kept for next time."), function() self:closeBoard() end)
 end
 
 function Chess:confirmUndo()
     if not self:canUndo() then return end
-    local text = self:twoPlayers() and "Annuler le dernier coup ?" or "Annuler ton dernier coup et la réponse de l'ordinateur ?"
+    local text = self:twoPlayers() and T("Undo the last move?") or T("Undo your last move and the computer's reply?")
     self:confirm(text, function() self:undo() end)
 end
 
 function Chess:confirmClaimDraw()
     if not self.game:can_claim_draw() or self.game:result() then return end
-    self:confirm("Réclamer la nulle ? La partie s'arrête sans gagnant.", function() self:claimDraw() end)
+    self:confirm(T("Claim a draw? The game ends without a winner."), function() self:claimDraw() end)
 end
 
 -- Interactions ----------------------------------------------------------------
@@ -451,16 +456,16 @@ function Chess:tapSquare(square)
     if #promotions > 0 then
         self:setSelection(nil)
         local choices = {}
-        local names = {q = "Dame", r = "Tour", b = "Fou", n = "Cavalier"}
+        local names = {q = "Queen", r = "Rook", b = "Bishop", n = "Knight"}
         for _, promotion in ipairs(promotions) do
             local chosen = promotion
-            choices[#choices + 1] = {{text = names[chosen:sub(5)], callback = function()
+            choices[#choices + 1] = {{text = T(names[chosen:sub(5)]), callback = function()
                 UIManager:close(self.promotion_dialog)
                 self.promotion_dialog = nil
                 self:makeMove(chosen)
             end}}
         end
-        self.promotion_dialog = ButtonDialog:new{title = "Promotion", buttons = choices, dismissable = false}
+        self.promotion_dialog = ButtonDialog:new{title = T("Promotion"), buttons = choices, dismissable = false}
         UIManager:show(self.promotion_dialog)
         return
     end
@@ -547,12 +552,12 @@ end
 function Chess:chooseMode()
     if self.mode_dialog then return end
     self.mode_dialog = ButtonDialog:new{
-        title = "Nouvelle partie",
+        title = T("New game"),
         buttons = {
-            {{text = "Apprentissage · indices et retour en arrière", callback = function() self:chooseColor("apprentissage") end}},
-            {{text = "Partie · sans aide", callback = function() self:chooseColor("partie") end}},
-            {{text = "Deux joueurs · à tour de rôle sur l'écran", callback = function() self:newGame("deux_joueurs", "w") end}},
-            {{text = "Retour", callback = function() self:closeModeDialog() end}},
+            {{text = T("Learning · hints and undo"), callback = function() self:chooseColor("apprentissage") end}},
+            {{text = T("Game · no help"), callback = function() self:chooseColor("partie") end}},
+            {{text = T("Two players · taking turns on the screen"), callback = function() self:newGame("deux_joueurs", "w") end}},
+            {{text = T("Back"), callback = function() self:closeModeDialog() end}},
         },
         tap_close_callback = function() self.mode_dialog = nil end,
     }
@@ -567,11 +572,11 @@ function Chess:chooseColor(mode)
     self:closeModeDialog()
     if self.color_dialog then return end
     self.color_dialog = ButtonDialog:new{
-        title = "Vos pièces",
+        title = T("Your pieces"),
         buttons = {
-            {{text = "Blancs · je commence", callback = function() self:newGame(mode, "w") end}},
-            {{text = "Noirs · l'ordinateur commence", callback = function() self:newGame(mode, "b") end}},
-            {{text = "Retour", callback = function() self:closeColorDialog(); self:chooseMode() end}},
+            {{text = T("White · I start"), callback = function() self:newGame(mode, "w") end}},
+            {{text = T("Black · the computer starts"), callback = function() self:newGame(mode, "b") end}},
+            {{text = T("Back"), callback = function() self:closeColorDialog(); self:chooseMode() end}},
         },
         tap_close_callback = function() self.color_dialog = nil end,
     }
@@ -584,30 +589,34 @@ end
 
 function Chess:confirmNewGame()
     if #self.game.moves == 0 then self:chooseMode(); return end
-    local text = self.game:result() and "Commencer une nouvelle partie ?"
-        or "Commencer une nouvelle partie ? La partie en cours sera effacée."
+    local text = self.game:result() and T("Start a new game?")
+        or T("Start a new game? The current game will be erased.")
     self:confirm(text, function() self:chooseMode() end)
 end
 
--- Réglages : niveau de l'ordinateur (sauf à deux joueurs) et repères de l'échiquier.
+-- Réglages : niveau de l'ordinateur (sauf à deux joueurs), repères de l'échiquier, langue.
 function Chess:openSettings()
     if self.settings_dialog then return end
     local buttons = {}
     if not self:twoPlayers() then
         for _, level in ipairs(levels) do
-            local text = level.name .. (level.blurb and (" · " .. level.blurb) or "")
+            local text = T(level.name) .. (level.blurb and (" · " .. T(level.blurb)) or "")
             if level.id == self.game.level then text = "✓ " .. text end
             local id = level.id
             buttons[#buttons + 1] = {{text = text, callback = function() self:setLevel(id) end}}
         end
     end
     buttons[#buttons + 1] = {{
-        text = self:showCoords() and "Masquer les repères (A–H, 1–8)" or "Afficher les repères (A–H, 1–8)",
+        text = self:showCoords() and T("Hide coordinates (A–H, 1–8)") or T("Show coordinates (A–H, 1–8)"),
         callback = function() self:toggleCoords() end,
     }}
-    buttons[#buttons + 1] = {{text = "Retour", callback = function() self:closeSettings() end}}
+    buttons[#buttons + 1] = {{
+        text = I18n.language == "fr" and T("Language: French · switch to English") or T("Language: English · switch to French"),
+        callback = function() self:toggleLanguage() end,
+    }}
+    buttons[#buttons + 1] = {{text = T("Back"), callback = function() self:closeSettings() end}}
     self.settings_dialog = ButtonDialog:new{
-        title = self:twoPlayers() and "Réglages" or "Réglages · niveau de l'ordinateur", buttons = buttons,
+        title = self:twoPlayers() and T("Settings") or T("Settings · computer level"), buttons = buttons,
         tap_close_callback = function() self.settings_dialog = nil end,
     }
     UIManager:show(self.settings_dialog)
@@ -620,6 +629,15 @@ end
 function Chess:toggleCoords()
     self:closeSettings()
     self.settings:saveSetting("coords", not self:showCoords())
+    self.settings:flush()
+    self:render()
+end
+
+-- La langue est propre au plugin ; l'entrée du menu KOReader change au prochain démarrage.
+function Chess:toggleLanguage()
+    self:closeSettings()
+    local language = I18n.set(I18n.language == "fr" and "en" or "fr")
+    self.settings:saveSetting("language", language)
     self.settings:flush()
     self:render()
 end

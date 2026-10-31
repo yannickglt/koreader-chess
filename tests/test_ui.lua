@@ -101,6 +101,12 @@ local Chess = dofile("chess.koplugin/main.lua")
 local registered
 -- Depuis un livre, ReaderUI transmet `dialog = ReaderUI` au plugin : ce champ ne doit jamais être fermé.
 local reader = {name = "readerui"}
+-- anglais par défaut : sans réglage de langue, l'entrée de menu est « Chess »
+local default_menu = {}
+local en_default = setmetatable({ui = {menu = {registerToMainMenu = function() end}}}, Chess)
+en_default:init(); en_default:addToMainMenu(default_menu)
+assert(default_menu.chess.text == "Chess")
+settings.data.language = "fr" -- la suite du test vérifie les chaînes françaises
 local chess = setmetatable({ui = {menu = {registerToMainMenu = function(_, plugin) registered = plugin end}}, dialog = reader}, Chess)
 chess:init()
 assert(registered == chess)
@@ -390,7 +396,7 @@ assert(view().status == "Échec et mat · les noirs gagnent", view().status)
 assert(chess.engine == nil)
 -- réglages à deux joueurs : pas de niveau, seulement les repères
 chess:onButton("settings")
-assert(chess.settings_dialog and #chess.settings_dialog.buttons == 2 and chess.settings_dialog.title == "Réglages")
+assert(chess.settings_dialog and #chess.settings_dialog.buttons == 3 and chess.settings_dialog.title == "Réglages")
 assert(chess.settings_dialog.buttons[1][1].text == "Masquer les repères (A–H, 1–8)")
 chess:closeSettings()
 
@@ -400,10 +406,10 @@ assert(view().status == "Échec et mat · l'ordinateur a gagné", view().status)
 
 -- réglages : niveau et repères
 chess:onButton("settings")
-assert(chess.settings_dialog and #chess.settings_dialog.buttons == 7)
+assert(chess.settings_dialog and #chess.settings_dialog.buttons == 8)
 assert(chess.settings_dialog.buttons[3][1].text == "✓ Facile", chess.settings_dialog.buttons[3][1].text)
 assert(chess.settings_dialog.buttons[1][1].text == "Découverte · joue souvent au hasard")
-assert(chess.settings_dialog.buttons[7][1].text == "Retour")
+assert(chess.settings_dialog.buttons[7][1].text == "Langue : français · passer en anglais" and chess.settings_dialog.buttons[8][1].text == "Retour")
 chess:setLevel("difficile")
 assert(chess.game.level == "difficile" and chess.settings_dialog == nil)
 assert(settings.data.game.level == "difficile" and view().detail == "Apprentissage · Difficile")
@@ -463,4 +469,40 @@ again.startEngine = function(self) self.engine = {play = function() end}; return
 again:openBoard()
 assert(again.board_widget.view.squares.e4.piece == nil) -- position affichée seulement après la réponse du moteur
 assert(again.board_widget.view.detail:find("Blancs : E2 → E4", 1, true), again.board_widget.view.detail)
+
+-- langue : anglais par défaut, bascule vers le français et retour dans Réglages
+settings.data.language = nil
+local en = setmetatable({ui = {menu = {registerToMainMenu = function() end}}}, Chess)
+en:init()
+local en_menu = {}
+en:addToMainMenu(en_menu)
+assert(en_menu.chess.text == "Chess")
+en.startEngine = function(self) self.engine = {play = function() end, think = function() end, hint = function() return true end}; return true end
+en:openBoard()
+en.game = Game.new({"e2e4", "e7e5"}, "facile")
+en.validate_save = false
+en:acceptPosition("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2", {"g1f3"}, false)
+assert(en.board_widget.view.status == "Your move", en.board_widget.view.status)
+assert(en.board_widget.view.detail == "Learning · Easy · Black: E7 → E5", en.board_widget.view.detail)
+assert(en.board_widget.view.buttons[1][2].text == "Settings" and en.board_widget.view.buttons[2][1].text == "Undo move")
+en:onButton("settings")
+assert(en.settings_dialog.title == "Settings · computer level" and en.settings_dialog.buttons[3][1].text == "✓ Easy")
+assert(en.settings_dialog.buttons[1][1].text == "Discovery · often plays at random")
+assert(en.settings_dialog.buttons[6][1].text == "Hide coordinates (A–H, 1–8)")
+assert(en.settings_dialog.buttons[7][1].text == "Language: English · switch to French")
+en.settings_dialog.buttons[7][1].callback()
+assert(settings.data.language == "fr" and en.settings_dialog == nil)
+assert(en.board_widget.view.status == "À vous de jouer" and en.board_widget.view.detail == "Apprentissage · Facile · Noirs : E7 → E5")
+en:onButton("settings")
+assert(en.settings_dialog.buttons[7][1].text == "Langue : français · passer en anglais")
+en.settings_dialog.buttons[7][1].callback()
+assert(settings.data.language == "en" and en.board_widget.view.status == "Your move")
+en:onButton("new")
+assert(shown[#shown].text == "Start a new game? The current game will be erased." and shown[#shown].ok_text == "Yes")
+en.game = Game.new(nil, "facile", {mode = "deux_joueurs"})
+en:acceptPosition("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", {"e2e4"}, false)
+assert(en.board_widget.view.status == "White to move" and en.board_widget.view.detail == "Two players")
+en.game = Game.new({"e2e4", "e7e5", "e4e5", "e5e4", "e4e5", "e5e4", "e4e5", "e5e4", "e4e5", "e7e8q"}, "facile")
+en:acceptPosition("4Q3/8/8/8/8/8/8/4K2k b - - 0 6", {"h1h2"}, false)
+assert(en.board_widget.view.detail == "Learning · Easy · Black: E7 → E8 (queen)", en.board_widget.view.detail)
 print("ui: OK")
