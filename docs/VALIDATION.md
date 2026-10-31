@@ -1,6 +1,6 @@
 # Validation sur la Tolino Vision Color
 
-Aucune étape ci-dessous ne doit être exécutée sans accord explicite : elles modifient la liseuse ou exigent d'y ouvrir un terminal. Les résultats des tests Mac et de l'émulation ARM (`docs/BENCHMARKS.md`) ne remplacent aucune de ces mesures.
+Les étapes ci-dessous modifient la liseuse ou exigent d'y ouvrir un terminal : à faire sur votre propre appareil, en connaissance de cause. Les résultats des tests Mac et de l'émulation ARM (`docs/BENCHMARKS.md`) ne remplacent aucune de ces mesures.
 
 Appareil : Tolino Vision Color, firmware 5.10.225420, KOReader kobov5 2026.07.1. KOReader l'identifie par le nom de code `monzaTolino` et lui applique le profil de la Kobo Libra Colour : écran 1264 × 1680, 300 ppp, couleur Kaleido, boutons physiques, capteur d'orientation, batterie exposée dans `/sys/class/power_supply/bd71827_bat`.
 

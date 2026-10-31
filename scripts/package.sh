@@ -9,7 +9,8 @@ file chess.koplugin/bin/stockfish | grep -q "ELF 32-bit LSB executable, ARM" \
 for lib in libatomic.so.1 libstdc++.so.6 libgcc_s.so.1; do
     test -f "chess.koplugin/bin/$lib" || { echo "bibliothèque absente : $lib" >&2; exit 1; }
 done
-version="$(date +%Y-%m-%d)-$(git rev-parse --short HEAD)"
+# Nom de version : le tag courant (release), sinon la date et le commit.
+version="$(git describe --tags --exact-match 2>/dev/null || echo "$(date +%Y-%m-%d)-$(git rev-parse --short HEAD)")"
 if [ -n "$(git status --porcelain chess.koplugin)" ]; then version="$version-dirty"; fi
 mkdir -p dist
 archive="dist/chess.koplugin-$version.zip"

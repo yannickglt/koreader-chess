@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
 local Blitbuffer = require("ffi/blitbuffer")
 local Board = require("board")
 local Device = require("device")

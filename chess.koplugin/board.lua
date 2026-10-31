@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
 local Board = {}
 local pieces = {
     K = "♔", Q = "♕", R = "♖", B = "♗", N = "♘", P = "♙",
